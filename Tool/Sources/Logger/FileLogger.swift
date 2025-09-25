@@ -8,6 +8,8 @@ public final class FileLoggingLocation {
             .appending("Logs")
             .appending("GitHubCopilot")
     }()
+    
+    public static let mcpRuntimeLogsPath = path.appending("MCPRuntimeLogs")
 }
 
 final class FileLogger {
@@ -33,30 +35,56 @@ final class FileLogger {
 }
 
 actor FileLoggerImplementation {
+    private let baseLogger: BaseFileLoggerImplementation
+    
+    public init() {
+        baseLogger = BaseFileLoggerImplementation(
+            logDir: FileLoggingLocation.path
+        )
+    }
+
+    public func logToFile(_ log: String) async {
+        await baseLogger.logToFile(log)
+    }
+}
+
+// MARK: - Shared Base File Logger
+actor BaseFileLoggerImplementation {
     #if DEBUG
     private let logBaseName = "github-copilot-for-xcode-dev"
     #else
     private let logBaseName = "github-copilot-for-xcode"
     #endif
     private let logExtension = "log"
-    private let maxLogSize = 5_000_000
-    private let logOverflowLimit = 5_000_000 * 2
-    private let maxLogs = 10
-    private let maxLockTime = 3_600 // 1 hour
-
+    private let maxLogSize: Int
+    private let logOverflowLimit: Int
+    private let maxLogs: Int
+    private let maxLockTime: Int
+    
     private let logDir: FilePath
     private let logName: String
     private let lockFilePath: FilePath
     private var logStream: OutputStream?
     private var logHandle: FileHandle?
-
-    public init() {
-        logDir = FileLoggingLocation.path
-        logName = "\(logBaseName).\(logExtension)"
-        lockFilePath = logDir.appending(logName + ".lock")
+    
+    init(
+        logDir: FilePath,
+        logFileName: String? = nil,
+        maxLogSize: Int = 5_000_000,
+        logOverflowLimit: Int? = nil,
+        maxLogs: Int = 10,
+        maxLockTime: Int = 3_600
+    ) {
+        self.logDir = logDir
+        self.logName = (logFileName ?? logBaseName) + "." + logExtension
+        self.lockFilePath = logDir.appending(logName + ".lock")
+        self.maxLogSize = maxLogSize
+        self.logOverflowLimit = logOverflowLimit ?? maxLogSize * 2
+        self.maxLogs = maxLogs
+        self.maxLockTime = maxLockTime
     }
 
-    public func logToFile(_ log: String) {
+    func logToFile(_ log: String) async {
         if let stream = logAppender() {
             let data = [UInt8](log.utf8)
             stream.write(data, maxLength: data.count)

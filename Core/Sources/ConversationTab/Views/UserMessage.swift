@@ -10,6 +10,8 @@ import ChatTab
 import ConversationServiceProvider
 import SwiftUIFlowLayout
 
+private let MAX_TEXT_LENGTH = 10000 // Maximum characters to prevent crashes
+
 struct UserMessage: View {
     var r: Double { messageBubbleCornerRadius }
     let id: String
@@ -27,14 +29,23 @@ struct UserMessage: View {
                 avatarImage
                     .resizable()
                     .aspectRatio(contentMode: .fill)
-                    .frame(width: 24, height: 24)
+                    .scaledFrame(width: 24, height: 24)
                     .clipShape(Circle())
             } else {
                 Image(systemName: "person.circle")
                     .resizable()
-                    .frame(width: 24, height: 24)
+                    .scaledToFit()
+                    .scaledFrame(width: 24, height: 24)
             }
         }
+    }
+
+    // Truncate the displayed user message if it's too long.
+    private var displayText: String {
+        if text.count > MAX_TEXT_LENGTH {
+            return String(text.prefix(MAX_TEXT_LENGTH)) + "\n… (message too long, rest hidden)"
+        }
+        return text
     }
 
     var body: some View {
@@ -44,13 +55,13 @@ struct UserMessage: View {
                     AvatarView()
 
                     Text(statusObserver.authStatus.username ?? "")
-                        .chatMessageHeaderTextStyle()
+                        .scaledFont(size: 13, weight: .semibold)
                         .padding(2)
                     
                     Spacer()
                 }
                 
-                ThemedMarkdownText(text: text, chat: chat)
+                ThemedMarkdownText(text: displayText, chat: chat)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 
                 if !imageReferences.isEmpty {

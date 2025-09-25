@@ -66,4 +66,33 @@ final class SystemUtilsTests: XCTestCase {
         // First component should be the initial path components
         XCTAssertTrue(appendedExistingPath.hasPrefix(existingCommonPath), "Should preserve original path at the beginning")
     }
+    
+    func test_executeCommand() throws {
+        // Test with a simple echo command
+        let testMessage = "Hello, World!"
+        let output = try SystemUtils.executeCommand(path: "/bin/echo", arguments: [testMessage])
+        
+        XCTAssertNotNil(output, "Output should not be nil for valid command")
+        XCTAssertEqual(
+            output?.trimmingCharacters(in: .whitespacesAndNewlines), 
+            testMessage, "Output should match the expected message"
+        )
+        
+        // Test with a command that returns multiple lines
+        let multilineOutput = try SystemUtils.executeCommand(path: "/bin/echo", arguments: ["-e", "line1\\nline2"])
+        XCTAssertNotNil(multilineOutput, "Output should not be nil for multiline command")
+        XCTAssertTrue(multilineOutput?.contains("line1") ?? false, "Output should contain 'line1'")
+        XCTAssertTrue(multilineOutput?.contains("line2") ?? false, "Output should contain 'line2'")
+        
+        // Test with a command that has no output
+        let noOutput = try SystemUtils.executeCommand(path: "/usr/bin/true", arguments: [])
+        XCTAssertNotNil(noOutput, "Output should not be nil even for commands with no output")
+        XCTAssertTrue(noOutput?.isEmpty ?? false, "Output should be empty for /usr/bin/true")
+        
+        // Test with an invalid command path should throw an error
+        XCTAssertThrowsError(
+            try SystemUtils.executeCommand(path: "/nonexistent/command", arguments: []), 
+            "Should throw error for invalid command path"
+        )
+    }
 }

@@ -36,6 +36,14 @@ public struct WidgetFeature {
         // MARK: ChatPanel
 
         public var chatPanelState = ChatPanelFeature.State()
+        
+        // MARK: CodeReview
+        
+        public var codeReviewPanelState = CodeReviewPanelFeature.State()
+        
+        // MARK: FixError
+        
+        public var fixErrorPanelState = FixErrorPanelFeature.State()
 
         // MARK: CircularWidget
 
@@ -111,6 +119,8 @@ public struct WidgetFeature {
         case panel(PanelFeature.Action)
         case chatPanel(ChatPanelFeature.Action)
         case circularWidget(CircularWidgetFeature.Action)
+        case codeReviewPanel(CodeReviewPanelFeature.Action)
+        case fixErrorPanel(FixErrorPanelFeature.Action)
     }
 
     var windowsController: WidgetWindowsController? {
@@ -137,6 +147,14 @@ public struct WidgetFeature {
 
         Scope(state: \._internalCircularWidgetState, action: \.circularWidget) {
             CircularWidgetFeature()
+        }
+        
+        Scope(state: \.codeReviewPanelState, action: \.codeReviewPanel) {
+            CodeReviewPanelFeature()
+        }
+        
+        Scope(state: \.fixErrorPanelState, action: \.fixErrorPanel) {
+            FixErrorPanelFeature()
         }
 
         Reduce { state, action in
@@ -398,6 +416,12 @@ public struct WidgetFeature {
                 return .none
 
             case .chatPanel:
+                return .none
+                
+            case .codeReviewPanel:
+                return .none
+                
+            case .fixErrorPanel:
                 return .none
             }
         }

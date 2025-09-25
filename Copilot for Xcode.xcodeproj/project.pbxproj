@@ -188,8 +188,8 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		3ABBEA282C8B9FE100C61D61 /* copilot-language-server */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; name = "copilot-language-server"; path = "Server/node_modules/@github/copilot-language-server/native/darwin-x64/copilot-language-server"; sourceTree = SOURCE_ROOT; };
-		3ABBEA2A2C8BA00300C61D61 /* copilot-language-server-arm64 */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; name = "copilot-language-server-arm64"; path = "Server/node_modules/@github/copilot-language-server/native/darwin-arm64/copilot-language-server-arm64"; sourceTree = SOURCE_ROOT; };
+		3ABBEA282C8B9FE100C61D61 /* copilot-language-server */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; name = "copilot-language-server"; path = "Server/node_modules/@github/copilot-language-server-darwin-x64/copilot-language-server"; sourceTree = SOURCE_ROOT; };
+		3ABBEA2A2C8BA00300C61D61 /* copilot-language-server-arm64 */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; name = "copilot-language-server-arm64"; path = "Server/node_modules/@github/copilot-language-server-darwin-arm64/copilot-language-server-arm64"; sourceTree = SOURCE_ROOT; };
 		3E5DB74F2D6B88EE00418952 /* ReleaseNotes.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = ReleaseNotes.md; sourceTree = "<group>"; };
 		424ACA202CA4697200FA20F2 /* Credits.rtf */ = {isa = PBXFileReference; lastKnownFileType = text.rtf; path = Credits.rtf; sourceTree = "<group>"; };
 		427C63272C6E868B000E557C /* OpenSettingsCommand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenSettingsCommand.swift; sourceTree = "<group>"; };
@@ -719,7 +719,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "export PATH=/usr/local/bin:/opt/homebrew/bin:$PATH\n\nnpm -C Server install\ncp Server/node_modules/@github/copilot-language-server/native/darwin-arm64/copilot-language-server Server/node_modules/@github/copilot-language-server/native/darwin-arm64/copilot-language-server-arm64\n\necho \"Build and copy webview js/html files as the bundle resources\"\nnpm -C Server run build\nmkdir -p \"${BUILT_PRODUCTS_DIR}/${CONTENTS_FOLDER_PATH}/Resources/webViewDist\"\ncp -R Server/dist/* \"${BUILT_PRODUCTS_DIR}/${CONTENTS_FOLDER_PATH}/Resources/webViewDist/\"\n";
+			shellScript = "export PATH=/usr/local/bin:/opt/homebrew/bin:$PATH\n\nnpm -C Server install --force\ncp Server/node_modules/@github/copilot-language-server-darwin-arm64/copilot-language-server Server/node_modules/@github/copilot-language-server-darwin-arm64/copilot-language-server-arm64\n\necho \"Build and copy webview js/html files as the bundle resources\"\nnpm -C Server run build\nmkdir -p \"${BUILT_PRODUCTS_DIR}/${CONTENTS_FOLDER_PATH}/Resources/webViewDist\"\ncp -R Server/dist/* \"${BUILT_PRODUCTS_DIR}/${CONTENTS_FOLDER_PATH}/Resources/webViewDist/\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 

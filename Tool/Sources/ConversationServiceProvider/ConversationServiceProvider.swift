@@ -13,6 +13,8 @@ public protocol ConversationServiceType {
     func models(workspace: WorkspaceInfo) async throws -> [CopilotModel]?
     func notifyDidChangeWatchedFiles(_ event: DidChangeWatchedFilesEvent, workspace: WorkspaceInfo) async throws
     func agents(workspace: WorkspaceInfo) async throws -> [ChatAgent]?
+    func notifyChangeTextDocument(fileURL: URL, content: String, version: Int, workspace: WorkspaceInfo) async throws
+    func reviewChanges(workspace: WorkspaceInfo, params: ReviewChangesParams) async throws -> CodeReviewResult?
 }
 
 public protocol ConversationServiceProvider {
@@ -25,49 +27,117 @@ public protocol ConversationServiceProvider {
     func models() async throws -> [CopilotModel]?
     func notifyDidChangeWatchedFiles(_ event: DidChangeWatchedFilesEvent, workspace: WorkspaceInfo) async throws
     func agents() async throws -> [ChatAgent]?
+    func notifyChangeTextDocument(fileURL: URL, content: String, version: Int, workspaceURL: URL?) async throws
+    func reviewChanges(_ params: ReviewChangesParams) async throws -> CodeReviewResult?
 }
 
-public struct FileReference: Hashable, Codable, Equatable {
+public struct ConversationFileReference: Hashable, Codable, Equatable {
     public let url: URL
     public let relativePath: String?
     public let fileName: String?
     public var isCurrentEditor: Bool = false
-
-    public init(url: URL, relativePath: String?, fileName: String?, isCurrentEditor: Bool = false) {
+    public var selection: LSPRange?
+    
+    public init(
+        url: URL, 
+        relativePath: String? = nil, 
+        fileName: String? = nil, 
+        isCurrentEditor: Bool = false, 
+        selection: LSPRange? = nil
+    ) {
         self.url = url
         self.relativePath = relativePath
         self.fileName = fileName
         self.isCurrentEditor = isCurrentEditor
-    }
-    
-    public init(url: URL, isCurrentEditor: Bool = false) {
-        self.url = url
-        self.relativePath = nil
-        self.fileName = nil
-        self.isCurrentEditor = isCurrentEditor
+        self.selection = selection
     }
     
     public func hash(into hasher: inout Hasher) {
         hasher.combine(url)
         hasher.combine(isCurrentEditor)
+        hasher.combine(selection)
     }
 
-    public static func == (lhs: FileReference, rhs: FileReference) -> Bool {
+    public static func == (lhs: ConversationFileReference, rhs: ConversationFileReference) -> Bool {
         return lhs.url == rhs.url && lhs.isCurrentEditor == rhs.isCurrentEditor
     }
 }
 
-extension FileReference {
-    public func getPathRelativeToHome() -> String {
-        let filePath = url.path
-        guard !filePath.isEmpty else { return "" }
-        
-        let homeDirectory = FileManager.default.homeDirectoryForCurrentUser.path
-        if !homeDirectory.isEmpty {
-            return filePath.replacingOccurrences(of: homeDirectory, with: "~")
+public struct ConversationDirectoryReference: Hashable, Codable {
+    public let url: URL
+    // The project URL that this directory belongs to.
+    // When directly dragging a directory into the chat, this can be nil.
+    public let projectURL: URL?
+    
+    public var depth: Int {
+        guard let projectURL else {
+            return -1
         }
         
-        return filePath
+        let directoryPathComponents = url.pathComponents
+        let projectPathComponents = projectURL.pathComponents
+        if directoryPathComponents.count <= projectPathComponents.count {
+            return 0
+        }
+        return directoryPathComponents.count - projectPathComponents.count
+    }
+    
+    public var relativePath: String {
+        guard let projectURL else {
+            return url.path
+        }
+        
+        return url.path.replacingOccurrences(of: projectURL.path, with: "")
+    }
+    
+    public var displayName: String { url.lastPathComponent }
+    
+    public init(url: URL, projectURL: URL? = nil) {
+        self.url = url
+        self.projectURL = projectURL
+    }
+}
+
+extension ConversationDirectoryReference: Equatable {
+    public static func == (lhs: ConversationDirectoryReference, rhs: ConversationDirectoryReference) -> Bool {
+        lhs.url.path == rhs.url.path && lhs.projectURL == rhs.projectURL
+    }
+}
+
+public enum ConversationAttachedReference: Hashable, Codable, Equatable {
+    case file(ConversationFileReference)
+    case directory(ConversationDirectoryReference)
+    
+    public var url: URL { 
+        switch self {
+        case .directory(let ref):
+            return ref.url
+        case .file(let ref):
+            return ref.url
+        }
+    }
+    
+    public var isDirectory: Bool {
+        switch self {
+        case .directory: true
+        case .file: false
+        }
+    }
+    
+    public var relativePath: String {
+        switch self {
+        case .directory(let dir): dir.relativePath
+        case .file(let file): 
+            file.relativePath ?? file.url.lastPathComponent
+        }
+    }
+    
+    public var displayName: String {
+        switch self {
+        case .directory(let dir): dir.displayName
+        case .file(let file):
+            file.fileName ?? file.url.lastPathComponent
+        }
     }
 }
 
@@ -264,8 +334,9 @@ public struct ConversationRequest {
     public var activeDoc: Doc?
     public var skills: [String]
     public var ignoredSkills: [String]?
-    public var references: [FileReference]?
+    public var references: [ConversationAttachedReference]?
     public var model: String?
+    public var modelProviderName: String?
     public var turns: [TurnSchema]
     public var agentMode: Bool = false
     public var userLanguage: String? = nil
@@ -279,8 +350,9 @@ public struct ConversationRequest {
         activeDoc: Doc? = nil,
         skills: [String],
         ignoredSkills: [String]? = nil,
-        references: [FileReference]? = nil,
+        references: [ConversationAttachedReference]? = nil,
         model: String? = nil,
+        modelProviderName: String? = nil,
         turns: [TurnSchema] = [],
         agentMode: Bool = false,
         userLanguage: String?,
@@ -295,6 +367,7 @@ public struct ConversationRequest {
         self.ignoredSkills = ignoredSkills
         self.references = references
         self.model = model
+        self.modelProviderName = modelProviderName
         self.turns = turns
         self.agentMode = agentMode
         self.userLanguage = userLanguage

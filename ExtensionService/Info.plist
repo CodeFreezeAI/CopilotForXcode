@@ -29,5 +29,7 @@
 	<string>$(COPILOT_FORUM_URL)</string>
 	<key>STANDARD_TELEMETRY_CHANNEL_KEY</key>
 	<string>$(STANDARD_TELEMETRY_CHANNEL_KEY)</string>
+	<key>GITHUB_APP_ID</key>
+	<string>$(GITHUB_APP_ID)</string>
 </dict>
 </plist>

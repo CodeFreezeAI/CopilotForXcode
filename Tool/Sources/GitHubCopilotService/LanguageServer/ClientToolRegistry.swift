@@ -1,7 +1,7 @@
 
 import ConversationServiceProvider
 
-func registerClientTools(server: GitHubCopilotConversationServiceType) async {
+func registerClientTools(server: GitHubCopilotConversationServiceType) async -> [LanguageModelTool] {
     var tools: [LanguageModelToolInformation] = []
     let runInTerminalTool = LanguageModelToolInformation(
         name: ToolName.runInTerminal.rawValue,
@@ -93,14 +93,38 @@ func registerClientTools(server: GitHubCopilotConversationServiceType) async {
             required: ["filePath", "code", "explanation"]
         )
     )
+
+    let fetchWebPageTool: LanguageModelToolInformation = .init(
+        name: ToolName.fetchWebPage.rawValue,
+        description: "Fetches the main content from a web page. This tool is useful for summarizing or analyzing the content of a webpage.",
+        inputSchema: .init(
+            type: "object",
+            properties: [
+                "urls": .init(
+                    type: "array",
+                    description: "An array of web page URLs to fetch content from.",
+                    items: .init(type: "string")
+                ),
+            ],
+            required: ["urls"]
+        ),
+        confirmationMessages: LanguageModelToolConfirmationMessages(
+            title: "Fetch Web Page",
+            message: "Web content may contain malicious code or attempt prompt injection attacks."
+        )
+    )
     
     tools.append(runInTerminalTool)
     tools.append(getTerminalOutputTool)
     tools.append(getErrorsTool)
     tools.append(insertEditIntoFileTool)
     tools.append(createFileTool)
+    tools.append(fetchWebPageTool)
 
     if !tools.isEmpty {
-        try? await server.registerTools(tools: tools)
+        let response = try? await server.registerTools(tools: tools)
+        return response ?? []
     }
+    
+    return []
 }

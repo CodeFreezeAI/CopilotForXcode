@@ -1,15 +1,13 @@
-import ConversationServiceProvider
-import JSONRPC
 import ChatTab
-
-enum ToolInvocationStatus: String {
-    case success, error, cancelled
-}
+import ConversationServiceProvider
+import Foundation
+import JSONRPC
 
 public protocol ToolContextProvider {
     // MARK: insert_edit_into_file
     var chatTabInfo: ChatTabInfo { get }
     func updateFileEdits(by fileEdit: FileEdit) -> Void
+    func notifyChangeTextDocument(fileURL: URL, content: String, version: Int) async throws
 }
 
 public typealias ChatHistoryUpdater = (String, [AgentRound]) -> Void
@@ -48,14 +46,42 @@ extension ICopilotTool {
         response: String = "",
         completion: @escaping (AnyJSONRPCResponse) -> Void
     ) {
-        let result: JSONValue = .array([
-            .hash([
-                "status": .string(status.rawValue),
-                "content": .array([.hash(["value": .string(response)])])
-            ]),
-            .null
-        ])
-        completion(AnyJSONRPCResponse(id: request.id, result: result))
+        completeResponses(
+            request,
+            status: status,
+            responses: [response],
+            completion: completion
+        )
+    }
+
+    ///
+    /// Completes a tool response with multiple data entries.
+    /// - Parameters:
+    ///   - request: The original tool invocation request.
+    ///   - status: The completion status of the tool execution (success, error, or cancelled).
+    ///   - responses: Array of string values to include in the response content.
+    ///   - completion: The completion handler to call with the response.
+    ///
+    func completeResponses(
+        _ request: InvokeClientToolRequest,
+        status: ToolInvocationStatus = .success,
+        responses: [String],
+        completion: @escaping (AnyJSONRPCResponse) -> Void
+    ) {
+        let toolResult = LanguageModelToolResult(status: status, content: responses.map { response in
+            LanguageModelToolResult.Content(value: response)
+        })
+        let jsonResult = try? JSONEncoder().encode(toolResult)
+        let jsonValue = (try? JSONDecoder().decode(JSONValue.self, from: jsonResult ?? Data())) ?? JSONValue.null
+        completion(
+            AnyJSONRPCResponse(
+                id: request.id,
+                result: JSONValue.array([
+                    jsonValue,
+                    JSONValue.null,
+                ])
+            )
+        )
     }
 }
 

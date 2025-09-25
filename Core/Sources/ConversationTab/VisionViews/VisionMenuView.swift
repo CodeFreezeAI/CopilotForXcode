@@ -91,24 +91,27 @@ public struct VisionMenuView: View {
                 Image(systemName: "macwindow")
                 Text("Capture Window")
             }
+            .scaledFont(.body)
             
             Button(action: { runScreenCapture(args: ["-s", "-c"]) }) {
                 Image(systemName: "macwindow.and.cursorarrow")
                 Text("Capture Selection")
             }
+            .scaledFont(.body)
             
             Button(action: { showImagePicker() }) {
                 Image(systemName: "photo")
                 Text("Attach File")
             }
+            .scaledFont(.body)
         } label: {
             Image(systemName: "photo.badge.plus")
                 .resizable()
                 .aspectRatio(contentMode: .fill)
-                .frame(width: 16, height: 16)
-                .padding(4)
+                .scaledFrame(width: 16, height: 16)
+                .scaledPadding(4)
                 .foregroundColor(.primary.opacity(0.85))
-                .font(Font.system(size: 11, weight: .semibold))
+                .scaledFont(size: 11, weight: .semibold)
         }
         .buttonStyle(HoverButtonStyle(padding: 0))
         .help("Attach images")
@@ -122,9 +125,13 @@ public struct VisionMenuView: View {
             action: {
                 NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_ScreenCapture")!)
             }).keyboardShortcut(.defaultAction)
+                .scaledFont(.body)
+            
             Button("Deny", role: .cancel, action: {})
+                .scaledFont(.body)
         } message: {
             Text("Grant access to this application in Privacy & Security settings, located in System Settings")
+                .scaledFont(.body)
         }
     }
 }

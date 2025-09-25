@@ -10,6 +10,7 @@ public class CopilotToolRegistry {
         tools[ToolName.getErrors.rawValue] = GetErrorsTool()
         tools[ToolName.insertEditIntoFile.rawValue] = InsertEditIntoFileTool()
         tools[ToolName.createFile.rawValue] = CreateFileTool()
+        tools[ToolName.fetchWebPage.rawValue] = FetchWebPageTool()
     }
 
     public func getTool(name: String) -> ICopilotTool? {

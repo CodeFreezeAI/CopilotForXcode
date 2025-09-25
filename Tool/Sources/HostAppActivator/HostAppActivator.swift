@@ -7,8 +7,10 @@ public let HostAppURL = locateHostBundleURL(url: Bundle.main.bundleURL)
 public extension Notification.Name {
     static let openSettingsWindowRequest = Notification
         .Name("com.github.CopilotForXcode.OpenSettingsWindowRequest")
-    static let openMCPSettingsWindowRequest = Notification
-        .Name("com.github.CopilotForXcode.OpenMCPSettingsWindowRequest")
+    static let openToolsSettingsWindowRequest = Notification
+        .Name("com.github.CopilotForXcode.OpenToolsSettingsWindowRequest")
+    static let openBYOKSettingsWindowRequest = Notification
+        .Name("com.github.CopilotForXcode.OpenBYOKSettingsWindowRequest")
 }
 
 public enum GitHubCopilotForXcodeSettingsLaunchError: Error, LocalizedError {
@@ -54,7 +56,7 @@ public func launchHostAppSettings() throws {
     }
 }
 
-public func launchHostAppMCPSettings() throws {
+public func launchHostAppToolsSettings() throws {
     // Try the AppleScript approach first, but only if app is already running
     if let hostApp = getRunningHostApp() {
         let activated = hostApp.activate(options: [.activateIgnoringOtherApps])
@@ -63,14 +65,34 @@ public func launchHostAppMCPSettings() throws {
         _ = tryLaunchWithAppleScript()
         
         DistributedNotificationCenter.default().postNotificationName(
-            .openMCPSettingsWindowRequest,
+            .openToolsSettingsWindowRequest,
             object: nil
         )
         Logger.ui.info("\(hostAppName()) MCP settings notification sent after activation")
         return
     } else {
         // If app is not running, launch it with the settings flag
-        try launchHostAppWithArgs(args: ["--mcp"])
+        try launchHostAppWithArgs(args: ["--tools"])
+    }
+}
+
+public func launchHostAppBYOKSettings() throws {
+    // Try the AppleScript approach first, but only if app is already running
+    if let hostApp = getRunningHostApp() {
+        let activated = hostApp.activate(options: [.activateIgnoringOtherApps])
+        Logger.ui.info("\(hostAppName()) activated: \(activated)")
+
+        _ = tryLaunchWithAppleScript()
+        
+        DistributedNotificationCenter.default().postNotificationName(
+            .openBYOKSettingsWindowRequest,
+            object: nil
+        )
+        Logger.ui.info("\(hostAppName()) BYOK settings notification sent after activation")
+        return
+    } else {
+        // If app is not running, launch it with the settings flag
+        try launchHostAppWithArgs(args: ["--byok"])
     }
 }
 

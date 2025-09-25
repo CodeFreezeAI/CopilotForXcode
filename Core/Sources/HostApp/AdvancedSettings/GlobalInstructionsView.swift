@@ -43,6 +43,7 @@ struct GlobalInstructionsView: View {
                         .foregroundColor(Color(nsColor: .placeholderTextColor))
                         .font(.body)
                         .allowsHitTesting(false)
+                        .padding(.horizontal, 6)
                 }
             }
             .padding(8)

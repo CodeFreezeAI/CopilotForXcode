@@ -10,6 +10,8 @@ import GitHubCopilotService
 import Logger
 import OrderedCollections
 import SwiftUI
+import GitHelper
+import SuggestionBasic
 
 public struct DisplayedChatMessage: Equatable {
     public enum Role: Equatable {
@@ -29,6 +31,7 @@ public struct DisplayedChatMessage: Equatable {
     public var steps: [ConversationProgressStep] = []
     public var editAgentRounds: [AgentRound] = []
     public var panelMessages: [CopilotShowMessageParams] = []
+    public var codeReviewRound: CodeReviewRound? = nil
 
     public init(
         id: String,
@@ -41,7 +44,8 @@ public struct DisplayedChatMessage: Equatable {
         errorMessages: [String] = [],
         steps: [ConversationProgressStep] = [],
         editAgentRounds: [AgentRound] = [],
-        panelMessages: [CopilotShowMessageParams] = []
+        panelMessages: [CopilotShowMessageParams] = [],
+        codeReviewRound: CodeReviewRound? = nil
     ) {
         self.id = id
         self.role = role
@@ -54,11 +58,90 @@ public struct DisplayedChatMessage: Equatable {
         self.steps = steps
         self.editAgentRounds = editAgentRounds
         self.panelMessages = panelMessages
+        self.codeReviewRound = codeReviewRound
     }
 }
 
 private var isPreview: Bool {
     ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1"
+}
+
+struct ChatContext: Equatable {
+    var typedMessage: String
+    var attachedReferences: [ConversationAttachedReference]
+    var attachedImages: [ImageReference]
+    
+    init(typedMessage: String, attachedReferences: [ConversationAttachedReference] = [], attachedImages: [ImageReference] = []) {
+        self.typedMessage = typedMessage
+        self.attachedReferences = attachedReferences
+        self.attachedImages = attachedImages
+    }
+    
+    static func from(_ message: DisplayedChatMessage, projectURL: URL) -> ChatContext {
+        .init(
+            typedMessage: message.text, 
+            attachedReferences: message.references.compactMap {
+                guard let url = $0.url else { return nil }
+                if $0.isDirectory {
+                    return .directory(.init(url: url))
+                } else {
+                    let relativePath = url.path.replacingOccurrences(of: projectURL.path, with: "")
+                    let fileName = url.lastPathComponent
+                    return .file(.init(url: url, relativePath: relativePath, fileName: fileName))
+                }
+            }, 
+            attachedImages: message.imageReferences)
+    }
+}
+
+struct ChatContextProvider: Equatable {
+    var contextStack: [ChatContext]
+    
+    init(contextStack: [ChatContext] = []) {
+        self.contextStack = contextStack
+    }
+    
+    mutating func reset() {
+        contextStack = []
+    }
+    
+    mutating func getNextContext() -> ChatContext? { 
+        guard !contextStack.isEmpty else {
+            return nil
+        }
+        
+        return contextStack.removeLast()
+    }
+    
+    func getPreviousContext(from history: [DisplayedChatMessage], projectURL: URL) -> ChatContext? {
+        let previousUserMessage: DisplayedChatMessage? = {
+            let userMessages = history.filter { $0.role == .user }
+            guard !userMessages.isEmpty else {
+                return nil
+            }
+            
+            let stackCount = contextStack.count
+            guard userMessages.count > stackCount else {
+                return nil
+            }
+            
+            let index = userMessages.count - stackCount - 1
+            guard index >= 0 else { return nil }
+            
+            return userMessages[index]
+        }()
+        
+        var context: ChatContext?
+        if let previousUserMessage {
+            context = .from(previousUserMessage, projectURL: projectURL)
+        }
+        
+        return context
+    }
+    
+    mutating func pushContext(_ context: ChatContext) { 
+        contextStack.append(context) 
+    }
 }
 
 @Reducer
@@ -70,14 +153,28 @@ struct Chat {
         // Not use anymore. the title of history tab will get from chat tab info
         // Keep this var as `ChatTabItemView` reference this
         var title: String = "New Chat"
-        var typedMessage = ""
+        var chatContext: ChatContext = .init(typedMessage: "", attachedReferences: [], attachedImages: [])
+        var contextProvider: ChatContextProvider = .init()
         var history: [DisplayedChatMessage] = []
         var isReceivingMessage = false
+        var requestType: ChatService.RequestType? = nil
         var chatMenu = ChatMenu.State()
         var focusedField: Field?
-        var currentEditor: FileReference? = nil
-        var selectedFiles: [FileReference] = []
-        var attachedImages: [ImageReference] = []
+        var currentEditor: ConversationFileReference? = nil
+        var attachedReferences: [ConversationAttachedReference] {
+            chatContext.attachedReferences
+        }
+        var attachedImages: [ImageReference] {
+            chatContext.attachedImages
+        }
+        var typedMessage: String {
+            get { chatContext.typedMessage }
+            set { 
+                chatContext.typedMessage = newValue
+                // User typed in. Need to reset contextProvider
+                contextProvider.reset()
+            }
+        }
         /// Cache the original content
         var fileEditMap: OrderedDictionary<URL, FileEdit> = [:]
         var diffViewerController: DiffViewWindowController? = nil
@@ -87,6 +184,8 @@ struct Chat {
             case textField
             case fileSearchBar
         }
+        
+        var codeReviewState = ConversationCodeReviewFeature.State()
     }
 
     enum Action: Equatable, BindableAction {
@@ -123,10 +222,10 @@ struct Chat {
         case chatMenu(ChatMenu.Action)
         
         // File context
-        case addSelectedFile(FileReference)
-        case removeSelectedFile(FileReference)
         case resetCurrentEditor
-        case setCurrentEditor(FileReference)
+        case setCurrentEditor(ConversationFileReference)
+        case addReference(ConversationAttachedReference)
+        case removeReference(ConversationAttachedReference)
         
         // Image context
         case addSelectedImage(ImageReference)
@@ -143,6 +242,18 @@ struct Chat {
         case setDiffViewerController(chat: StoreOf<Chat>)
 
         case agentModeChanged(Bool)
+        
+        // Code Review
+        case codeReview(ConversationCodeReviewFeature.Action)
+        
+        // Chat Context
+        case reloadNextContext
+        case reloadPreviousContext
+        case resetContextProvider
+
+        // External Action
+        case observeFixErrorNotification
+        case fixEditorErrorIssue(EditorErrorIssue)
     }
 
     let service: ChatService
@@ -153,6 +264,7 @@ struct Chat {
         case observeIsReceivingMessageChange(UUID)
         case sendMessage(UUID)
         case observeFileEditChange(UUID)
+        case observeFixErrorNotification(UUID)
     }
 
     @Dependency(\.openURL) var openURL
@@ -165,6 +277,10 @@ struct Chat {
         Scope(state: \.chatMenu, action: /Action.chatMenu) {
             ChatMenu(service: service)
         }
+        
+        Scope(state: \.codeReviewState, action: /Action.codeReview) {
+            ConversationCodeReviewFeature(service: service)
+        }
 
         Reduce { state, action in
             switch action {
@@ -176,7 +292,8 @@ struct Chat {
                     await send(.isReceivingMessageChanged)
                     await send(.focusOnTextField)
                     await send(.refresh)
-
+                    await send(.observeFixErrorNotification)
+                    
                     let publisher = NotificationCenter.default.publisher(for: .gitHubCopilotChatModeDidChange)
                     for await _ in publisher.values {
                         let isAgentMode = AppState.shared.isAgentModeEnabled()
@@ -197,22 +314,31 @@ struct Chat {
                 )
                 state.typedMessage = ""
                 
-                let selectedFiles = state.selectedFiles
-                let selectedModelFamily = AppState.shared.getSelectedModelFamily() ?? CopilotModelManager.getDefaultChatModel(scope: AppState.shared.modelScope())?.modelFamily
+                let selectedModel = AppState.shared.getSelectedModel()
+                let selectedModelFamily = selectedModel?.modelFamily ?? CopilotModelManager.getDefaultChatModel(
+                    scope: AppState.shared.modelScope()
+                )?.modelFamily
                 let agentMode = AppState.shared.isAgentModeEnabled()
-                
-                let shouldAttachImages = AppState.shared.isSelectedModelSupportVision() ?? CopilotModelManager.getDefaultChatModel(scope: AppState.shared.modelScope())?.supportVision ?? false
+                let shouldAttachImages = selectedModel?.supportVision ?? CopilotModelManager.getDefaultChatModel(
+                    scope: AppState.shared.modelScope()
+                )?.supportVision ?? false
                 let attachedImages: [ImageReference] = shouldAttachImages ? state.attachedImages : []
-                state.attachedImages = []
-                return .run { _ in
+
+                let references = state.attachedReferences
+                state.chatContext.attachedImages = []
+                
+                return .run { send in
+                    await send(.resetContextProvider)
+                    
                     try await service
                         .send(
                             id,
                             content: message,
                             contentImageReferences: attachedImages,
                             skillSet: skillSet,
-                            references: selectedFiles,
+                            references: references,
                             model: selectedModelFamily,
+                            modelProviderName: selectedModel?.providerName,
                             agentMode: agentMode,
                             userLanguage: chatResponseLocale
                         )
@@ -240,11 +366,27 @@ struct Chat {
                     isCurrentEditorContextEnabled: enableCurrentEditorContext
                 )
                 
-                let selectedFiles = state.selectedFiles
-                let selectedModelFamily = AppState.shared.getSelectedModelFamily() ?? CopilotModelManager.getDefaultChatModel(scope: AppState.shared.modelScope())?.modelFamily
+                let selectedModel = AppState.shared.getSelectedModel()
+                let selectedModelFamily = selectedModel?.modelFamily ?? CopilotModelManager.getDefaultChatModel(
+                    scope: AppState.shared.modelScope()
+                )?.modelFamily
+                let references = state.attachedReferences
+                let agentMode = AppState.shared.isAgentModeEnabled()
                 
-                return .run { _ in
-                    try await service.send(id, content: message, skillSet: skillSet, references: selectedFiles, model: selectedModelFamily, userLanguage: chatResponseLocale)
+                return .run { send in
+                    await send(.resetContextProvider)
+
+                    try await service
+                        .send(
+                            id,
+                            content: message,
+                            skillSet: skillSet,
+                            references: references,
+                            model: selectedModelFamily,
+                            modelProviderName: selectedModel?.providerName,
+                            agentMode: agentMode,
+                            userLanguage: chatResponseLocale
+                        )
                 }.cancellable(id: CancelID.sendMessage(self.id))
 
             case .returnButtonTapped:
@@ -389,7 +531,8 @@ struct Chat {
                             .init(
                                 uri: $0.uri,
                                 status: $0.status,
-                                kind: $0.kind
+                                kind: $0.kind,
+                                referenceType: $0.referenceType
                             )
                         },
                         followUp: message.followUp,
@@ -397,7 +540,8 @@ struct Chat {
                         errorMessages: message.errorMessages,
                         steps: message.steps,
                         editAgentRounds: message.editAgentRounds,
-                        panelMessages: message.panelMessages
+                        panelMessages: message.panelMessages,
+                        codeReviewRound: message.codeReviewRound
                     ))
 
                     return all
@@ -407,6 +551,7 @@ struct Chat {
 
             case .isReceivingMessageChanged:
                 state.isReceivingMessage = service.isReceivingMessage
+                state.requestType = service.requestType
                 return .none
                 
             case .fileEditChanged:
@@ -467,31 +612,36 @@ struct Chat {
                  ChatInjector().insertCodeBlock(codeBlock: code)
                  return .none
 
-            // MARK: - File Context
-            case let .addSelectedFile(fileReference):
-                guard !state.selectedFiles.contains(fileReference) else { return .none }
-                state.selectedFiles.append(fileReference)
-                return .none
-            case let .removeSelectedFile(fileReference):
-                guard let index = state.selectedFiles.firstIndex(of: fileReference) else { return .none }
-                state.selectedFiles.remove(at: index)
-                return .none
+            // MARK: - Context
             case .resetCurrentEditor:
                 state.currentEditor = nil
                 return .none
             case let .setCurrentEditor(fileReference):
                 state.currentEditor = fileReference
                 return .none
+            case let .addReference(ref):
+                guard !state.chatContext.attachedReferences.contains(ref) else { 
+                    return .none
+                }
+                state.chatContext.attachedReferences.append(ref)
+                return .none
+                
+            case let .removeReference(ref):
+                guard let index = state.chatContext.attachedReferences.firstIndex(of: ref) else {
+                    return .none
+                }
+                state.chatContext.attachedReferences.remove(at: index)
+                return .none
                 
             // MARK: - Image Context
             case let .addSelectedImage(imageReference):
                 guard !state.attachedImages.contains(imageReference) else { return .none }
-                state.attachedImages.append(imageReference)
-                return .none
+                state.chatContext.attachedImages.append(imageReference)
+                return .run { send in await send(.resetContextProvider) }
             case let .removeSelectedImage(imageReference):
                 guard let index = state.attachedImages.firstIndex(of: imageReference) else { return .none }
-                state.attachedImages.remove(at: index)
-                return .none
+                state.chatContext.attachedImages.remove(at: index)
+                return .run { send in await send(.resetContextProvider) }
                 
             // MARK: - Agent Edits
                 
@@ -540,6 +690,106 @@ struct Chat {
             case let .agentModeChanged(isAgentMode):
                 state.isAgentMode = isAgentMode
                 return .none
+                
+            case .codeReview:
+                return .none
+                
+            // MARK: Chat Context
+            case .reloadNextContext:
+                guard let context = state.contextProvider.getNextContext() else {
+                    return .none
+                }
+                
+                state.chatContext = context
+                
+                return .run { send in
+                    await send(.focusOnTextField)
+                }
+                
+            case .reloadPreviousContext:
+                guard let projectURL = service.getProjectRootURL(),
+                      let context = state.contextProvider.getPreviousContext(
+                        from: state.history,
+                        projectURL: projectURL) 
+                else {
+                    return .none
+                }
+                
+                let currentContext = state.chatContext
+                state.chatContext = context
+                state.contextProvider.pushContext(currentContext)
+                
+                return .run { send in
+                    await send(.focusOnTextField)
+                }
+                
+            case .resetContextProvider:
+                state.contextProvider.reset()
+                return .none
+
+            // MARK: - External action
+                
+            case .observeFixErrorNotification:
+                return .run { send in 
+                    let publisher = NotificationCenter.default.publisher(for: .fixEditorErrorIssue)
+                    
+                    for await notification in publisher.values {
+                        guard service.chatTabInfo.isSelected,
+                              let issue = notification.userInfo?["editorErrorIssue"] as? EditorErrorIssue
+                        else {
+                            continue
+                        }
+                        
+                        await send(.fixEditorErrorIssue(issue))
+                    }
+                }.cancellable(
+                    id: CancelID.observeFixErrorNotification(id), 
+                    cancelInFlight: true)
+                
+            case .fixEditorErrorIssue(let issue):
+                guard issue.workspaceURL == service.getWorkspaceURL(),
+                      !issue.lineAnnotations.isEmpty
+                else {
+                    return .none
+                }
+                
+                guard !state.isReceivingMessage else {
+                    return .run { _ in
+                        await MainActor.run {
+                            NotificationCenter.default.post(
+                                name: .fixEditorErrorIssueError,
+                                object: nil,
+                                userInfo: ["error": FixEditorErrorIssueFailure.isReceivingMessage(id: issue.id)]
+                            )
+                        }
+                    }
+                }
+                
+                let errorAnnotationMessage: String = issue.lineAnnotations
+                    .map { "❗\($0.originalAnnotation)" }
+                    .joined(separator: "\n\n")
+                let message = "Analyze and fix the following error(s): \n\n\(errorAnnotationMessage)"
+                
+                let skillSet = state.buildSkillSet(isCurrentEditorContextEnabled: enableCurrentEditorContext)
+                let references: [ConversationAttachedReference] = [.file(.init(url: issue.fileURL))]
+                let selectedModel = AppState.shared.getSelectedModel()
+                let selectedModelFamily = selectedModel?.modelFamily ?? CopilotModelManager.getDefaultChatModel(
+                    scope: AppState.shared.modelScope()
+                )?.modelFamily
+                let agentMode = AppState.shared.isAgentModeEnabled()
+                
+                return .run { _ in 
+                    try await service.send(
+                        UUID().uuidString,
+                        content: message,
+                        skillSet: skillSet,
+                        references: references,
+                        model: selectedModelFamily,
+                        modelProviderName: selectedModel?.providerName,
+                        agentMode: agentMode,
+                        userLanguage: chatResponseLocale
+                    )
+                }.cancellable(id: CancelID.sendMessage(self.id))
             }
         }
     }
@@ -612,4 +862,32 @@ private actor TimedDebounceFunction {
         lastFireTime = Date()
         await block()
     }
+}
+
+public struct EditorErrorIssue: Equatable {
+    public let lineAnnotations: [EditorInformation.LineAnnotation]
+    public let fileURL: URL
+    public let workspaceURL: URL
+    public let id: String
+    
+    public init(
+        lineAnnotations: [EditorInformation.LineAnnotation], 
+        fileURL: URL, 
+        workspaceURL: URL,
+        id: String
+    ) {
+        self.lineAnnotations = lineAnnotations
+        self.fileURL = fileURL
+        self.workspaceURL = workspaceURL
+        self.id = id
+    }
+}
+
+public enum FixEditorErrorIssueFailure: Equatable {
+    case isReceivingMessage(id: String)
+}
+
+public extension Notification.Name {
+    static let fixEditorErrorIssue = Notification.Name("com.github.CopilotForXcode.fixEditorErrorIssue")
+    static let fixEditorErrorIssueError = Notification.Name("com.github.CopilotForXcode.fixEditorErrorIssueError")
 }

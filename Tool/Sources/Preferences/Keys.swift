@@ -243,6 +243,10 @@ public extension UserDefaultPreferenceKeys {
 // MARK: - Chat
 
 public extension UserDefaultPreferenceKeys {
+    
+    var fontScale: PreferenceKey<Double> {
+        .init(defaultValue: 1.0, key: "FontScale")
+    }
 
     var chatFontSize: PreferenceKey<Double> {
         .init(defaultValue: 13, key: "ChatFontSize")
@@ -311,6 +315,10 @@ public extension UserDefaultPreferenceKeys {
     
     var autoAttachChatToXcode: PreferenceKey<Bool> {
         .init(defaultValue: true, key: "AutoAttachChatToXcode")
+    }
+    
+    var enableFixError: PreferenceKey<Bool> {
+        .init(defaultValue: true, key: "EnableFixError")
     }
 }
 
@@ -586,5 +594,9 @@ public extension UserDefaultPreferenceKeys {
 
     var verboseLoggingEnabled: PreferenceKey<Bool> {
         .init(defaultValue: false, key: "VerboseLoggingEnabled")
+    }
+    
+    var currentUserName: PreferenceKey<String> {
+        .init(defaultValue: "", key: "CurrentUserName")
     }
 }

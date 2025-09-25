@@ -1,5 +1,6 @@
 import Foundation
 import GitHubCopilotService
+import ConversationServiceProvider
 import Logger
 import Status
 
@@ -357,6 +358,8 @@ extension XPCExtensionService {
             }
         }
     }
+    
+    // MARK: MCP Server Tools
 
     @XPCServiceActor
     public func getAvailableMCPServerToolsCollections() async throws -> [MCPServerToolsCollection]? {
@@ -392,6 +395,133 @@ extension XPCExtensionService {
         }
     }
     
+    // MARK: MCP Registry
+    
+    @XPCServiceActor
+    public func listMCPRegistryServers(_ params: MCPRegistryListServersParams) async throws -> MCPRegistryServerList? {
+        return try await withXPCServiceConnected {
+            service, continuation in
+            do {
+                let params = try JSONEncoder().encode(params)
+                service.listMCPRegistryServers(params) { data, error in
+                    if let error {
+                        continuation.reject(error)
+                        return
+                    }
+
+                    guard let data else {
+                        continuation.resume(nil)
+                        return
+                    }
+
+                    do {
+                        let response = try JSONDecoder().decode(MCPRegistryServerList.self, from: data)
+                        continuation.resume(response)
+                    } catch {
+                        continuation.reject(error)
+                    }
+                }
+            } catch {
+                continuation.reject(error)
+            }
+        }
+    }
+    
+    @XPCServiceActor
+    public func getMCPRegistryServer(_ params: MCPRegistryGetServerParams) async throws -> MCPRegistryServerDetail? {
+        return try await withXPCServiceConnected {
+            service, continuation in
+            do {
+                let params = try JSONEncoder().encode(params)
+                service.getMCPRegistryServer(params) { data, error in
+                    if let error {
+                        continuation.reject(error)
+                        return
+                    }
+
+                    guard let data else {
+                        continuation.resume(nil)
+                        return
+                    }
+
+                    do {
+                        let response = try JSONDecoder().decode(MCPRegistryServerDetail.self, from: data)
+                        continuation.resume(response)
+                    } catch {
+                        continuation.reject(error)
+                    }
+                }
+            } catch {
+                continuation.reject(error)
+            }
+        }
+    }
+    
+    @XPCServiceActor
+    public func getAvailableLanguageModelTools() async throws -> [LanguageModelTool]? {
+        return try await withXPCServiceConnected {
+            service, continuation in
+            service.getAvailableLanguageModelTools { data in
+                guard let data else {
+                    continuation.resume(nil)
+                    return
+                }
+
+                do {
+                    let tools = try JSONDecoder().decode([LanguageModelTool].self, from: data)
+                    continuation.resume(tools)
+                } catch {
+                    continuation.reject(error)
+                }
+            }
+        }
+    }
+    
+    @XPCServiceActor
+    public func updateToolsStatus(_ update: [ToolStatusUpdate]) async throws -> [LanguageModelTool]? {
+        return try await withXPCServiceConnected {
+            service, continuation in
+            do {
+                let data = try JSONEncoder().encode(update)
+                service.updateToolsStatus(tools: data) { data in
+                    guard let data else {
+                        continuation.resume(nil)
+                        return
+                    }
+
+                    do {
+                        let response = try JSONDecoder().decode([LanguageModelTool].self, from: data)
+                        continuation.resume(response)
+                    } catch {
+                        continuation.reject(error)
+                    }
+                }
+            } catch {
+                continuation.reject(error)
+            }
+        }
+    }
+    
+    @XPCServiceActor
+    public func getCopilotFeatureFlags() async throws -> FeatureFlags? {
+        return try await withXPCServiceConnected {
+            service, continuation in
+            service.getCopilotFeatureFlags { data in
+                guard let data else {
+                    continuation.resume(nil)
+                    return
+                }
+
+                do {
+                    let featureFlags = try JSONDecoder().decode(FeatureFlags.self, from: data)
+                    continuation.resume(featureFlags)
+                } catch {
+                    continuation.reject(error)
+                }
+            }
+        }
+    }
+    
     @XPCServiceActor
     public func signOutAllGitHubCopilotService() async throws {
         return try await withXPCServiceConnected {
@@ -415,6 +545,162 @@ extension XPCExtensionService {
                 } catch {
                     continuation.reject(error)
                 }
+            }
+        }
+    }
+    
+    // MARK: BYOK
+    @XPCServiceActor
+    public func saveBYOKApiKey(_ params: BYOKSaveApiKeyParams) async throws -> BYOKSaveApiKeyResponse? {
+        return try await withXPCServiceConnected {
+            service, continuation in
+            do {
+                let params = try JSONEncoder().encode(params)
+                service.saveBYOKApiKey(params) { data in
+                    guard let data else {
+                        continuation.resume(nil)
+                        return
+                    }
+
+                    do {
+                        let response = try JSONDecoder().decode(BYOKSaveApiKeyResponse.self, from: data)
+                        continuation.resume(response)
+                    } catch {
+                        continuation.reject(error)
+                    }
+                }
+            } catch {
+                continuation.reject(error)
+            }
+        }
+    }
+    
+    @XPCServiceActor
+    public func listBYOKApiKey(_ params: BYOKListApiKeysParams) async throws -> BYOKListApiKeysResponse? {
+        return try await withXPCServiceConnected {
+            service, continuation in
+            do {
+                let params = try JSONEncoder().encode(params)
+                service.listBYOKApiKeys(params) { data in
+                    guard let data else {
+                        continuation.resume(nil)
+                        return
+                    }
+
+                    do {
+                        let response = try JSONDecoder().decode(BYOKListApiKeysResponse.self, from: data)
+                        continuation.resume(response)
+                    } catch {
+                        continuation.reject(error)
+                    }
+                }
+            } catch {
+                continuation.reject(error)
+            }
+        }
+    }
+    
+    @XPCServiceActor
+    public func deleteBYOKApiKey(_ params: BYOKDeleteApiKeyParams) async throws -> BYOKDeleteApiKeyResponse? {
+        return try await withXPCServiceConnected {
+            service, continuation in
+            do {
+                let params = try JSONEncoder().encode(params)
+                service.deleteBYOKApiKey(params) { data in
+                    guard let data else {
+                        continuation.resume(nil)
+                        return
+                    }
+
+                    do {
+                        let response = try JSONDecoder().decode(BYOKDeleteApiKeyResponse.self, from: data)
+                        continuation.resume(response)
+                    } catch {
+                        continuation.reject(error)
+                    }
+                }
+            } catch {
+                continuation.reject(error)
+            }
+        }
+    }
+    
+    @XPCServiceActor
+    public func saveBYOKModel(_ params: BYOKSaveModelParams) async throws -> BYOKSaveModelResponse? {
+        return try await withXPCServiceConnected {
+            service, continuation in
+            do {
+                let params = try JSONEncoder().encode(params)
+                service.saveBYOKModel(params) { data in
+                    guard let data else {
+                        continuation.resume(nil)
+                        return
+                    }
+
+                    do {
+                        let response = try JSONDecoder().decode(BYOKSaveModelResponse.self, from: data)
+                        continuation.resume(response)
+                    } catch {
+                        continuation.reject(error)
+                    }
+                }
+            } catch {
+                continuation.reject(error)
+            }
+        }
+    }
+    
+    @XPCServiceActor
+    public func listBYOKModels(_ params: BYOKListModelsParams) async throws -> BYOKListModelsResponse? {
+        return try await withXPCServiceConnected {
+            service, continuation in
+            do {
+                let params = try JSONEncoder().encode(params)
+                service.listBYOKModels(params) { data, error in
+                    if let error {
+                        continuation.reject(error)
+                        return
+                    }
+
+                    guard let data else {
+                        continuation.resume(nil)
+                        return
+                    }
+
+                    do {
+                        let response = try JSONDecoder().decode(BYOKListModelsResponse.self, from: data)
+                        continuation.resume(response)
+                    } catch {
+                        continuation.reject(error)
+                    }
+                }
+            } catch {
+                continuation.reject(error)
+            }
+        }
+    }
+    
+    @XPCServiceActor
+    public func deleteBYOKModel(_ params: BYOKDeleteModelParams) async throws -> BYOKDeleteModelResponse? {
+        return try await withXPCServiceConnected {
+            service, continuation in
+            do {
+                let params = try JSONEncoder().encode(params)
+                service.deleteBYOKModel(params) { data in
+                    guard let data else {
+                        continuation.resume(nil)
+                        return
+                    }
+
+                    do {
+                        let response = try JSONDecoder().decode(BYOKDeleteModelResponse.self, from: data)
+                        continuation.resume(response)
+                    } catch {
+                        continuation.reject(error)
+                    }
+                }
+            } catch {
+                continuation.reject(error)
             }
         }
     }

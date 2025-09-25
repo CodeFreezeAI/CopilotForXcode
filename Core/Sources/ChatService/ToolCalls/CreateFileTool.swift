@@ -1,4 +1,5 @@
 import JSONRPC
+import AppKit
 import ConversationServiceProvider
 import Foundation
 import Logger
@@ -56,7 +57,7 @@ public class CreateFileTool: ICopilotTool {
             toolName: CreateFileTool.name
         ))
         
-        Utils.openFileInXcode(fileURL: URL(fileURLWithPath: filePath)) { _, error in
+        NSWorkspace.openFileInXcode(fileURL: URL(fileURLWithPath: filePath)) { _, error in
             if let error = error {
                 Logger.client.info("Failed to open file at \(filePath), \(error)")
             }

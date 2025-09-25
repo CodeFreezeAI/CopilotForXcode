@@ -11,6 +11,7 @@ public class FileChangeWatcherService {
     private(set) public var workspaceURL: URL
     private(set) public var publisher: PublisherType
     private(set) public var publishInterval: TimeInterval
+    private(set) public var directoryChangePublisher: PublisherType?
     
     // Dependencies injected for testing
     internal let workspaceFileProvider: WorkspaceFileProvider
@@ -27,13 +28,15 @@ public class FileChangeWatcherService {
         publisher: @escaping PublisherType,
         publishInterval: TimeInterval = 3.0,
         workspaceFileProvider: WorkspaceFileProvider = FileChangeWatcherWorkspaceFileProvider(),
-        watcherFactory: FileWatcherFactory? = nil
+        watcherFactory: FileWatcherFactory? = nil,
+        directoryChangePublisher: PublisherType?
     ) {
         self.workspaceURL = workspaceURL
         self.publisher = publisher
         self.publishInterval = publishInterval
         self.workspaceFileProvider = workspaceFileProvider
         self.watcherFactory = watcherFactory ?? DefaultFileWatcherFactory()
+        self.directoryChangePublisher = directoryChangePublisher
     }
     
     deinit {
@@ -49,7 +52,12 @@ public class FileChangeWatcherService {
         let projects = workspaceFileProvider.getProjects(by: workspaceURL)
         guard projects.count > 0 else { return }
         
-        watcher = watcherFactory.createDirectoryWatcher(watchedPaths: projects, changePublisher: publisher, publishInterval: publishInterval)
+        watcher = watcherFactory.createDirectoryWatcher(
+            watchedPaths: projects, 
+            changePublisher: publisher, 
+            publishInterval: publishInterval,
+            directoryChangePublisher: directoryChangePublisher
+        )
         Logger.client.info("Started watching for file changes in \(projects)")
         
         startWatchingProject()
@@ -184,7 +192,11 @@ public class FileChangeWatcherServicePool {
     private init() {}
     
     @PoolActor
-    public func watch(for workspaceURL: URL, publisher: @escaping PublisherType) {
+    public func watch(
+        for workspaceURL: URL, 
+        publisher: @escaping PublisherType,
+        directoryChangePublisher: PublisherType? = nil
+    ) {
         guard workspaceURL.path != "/" else { return }
         
         var validWorkspaceURL: URL? = nil
@@ -198,7 +210,11 @@ public class FileChangeWatcherServicePool {
         
         guard servicePool[workspaceURL] == nil else { return }
         
-        let watcherService = FileChangeWatcherService(validWorkspaceURL, publisher: publisher)
+        let watcherService = FileChangeWatcherService(
+            validWorkspaceURL, 
+            publisher: publisher,
+            directoryChangePublisher: directoryChangePublisher
+        )
         watcherService.startWatching()
         
         servicePool[workspaceURL] = watcherService

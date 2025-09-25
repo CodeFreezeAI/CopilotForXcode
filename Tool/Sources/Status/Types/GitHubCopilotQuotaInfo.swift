@@ -12,4 +12,6 @@ public struct GitHubCopilotQuotaInfo: Codable, Equatable, Hashable {
     public var premiumInteractions: QuotaSnapshot
     public var resetDate: String
     public var copilotPlan: String
+    
+    public var isFreeUser: Bool { copilotPlan == "free" }
 }

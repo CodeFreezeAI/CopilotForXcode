@@ -62,6 +62,7 @@ struct WorkingSetHeader: View {
     ) -> some View {
         Button(action: action) {
             Text(text)
+                .scaledFont(.body)
                 .foregroundColor(textForegroundColor)
                 .padding(.horizontal, 6)
                 .padding(.vertical, 2)
@@ -81,7 +82,7 @@ struct WorkingSetHeader: View {
             HStack(spacing: 0) {
                 Text(getTitle())
                     .foregroundColor(.secondary)
-                    .font(.system(size: 13))
+                    .scaledFont(size: 13)
                 
                 Spacer()
                 
@@ -138,17 +139,17 @@ struct FileEditView: View {
                 switch imageType {
                 case .system(let name):
                     Image(systemName: name)
-                        .font(.system(size: 16, weight: .regular))
+                        .scaledFont(size: 15, weight: .regular)
                 case .asset(let name):
                     Image(name)
                         .renderingMode(.template)
                         .resizable()
                         .aspectRatio(contentMode: .fit)
-                        .frame(height: 16)
+                        .scaledFrame(height: 16)
                 }
             }
             .foregroundColor(.white)
-            .frame(width: 22)
+            .scaledFrame(width: 22)
             .frame(maxHeight: .infinity)
         }
         .buttonStyle(HoverButtonStyle(padding: 0, hoverColor: .white.opacity(0.2)))
@@ -192,11 +193,11 @@ struct FileEditView: View {
                 drawFileIcon(fileEdit.fileURL)
                     .resizable()
                     .scaledToFit()
-                    .frame(width: 16, height: 16)
+                    .scaledFrame(width: 16, height: 16)
                     .foregroundColor(.secondary)
                 
                 Text(fileEdit.fileURL.lastPathComponent)
-                    .font(.system(size: 13))
+                    .scaledFont(size: 13)
                     .foregroundColor(isHovering ? .white : Color("WorkingSetItemColor"))
             }
             

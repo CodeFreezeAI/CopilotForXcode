@@ -1,6 +1,7 @@
 import ConversationServiceProvider
 import SwiftUI
 import Foundation
+import SharedUIComponents
 
 struct ImageReferenceItemView: View {
     let item: ImageReference
@@ -43,7 +44,7 @@ struct ImageReferenceItemView: View {
 
             Text(text)
                 .lineLimit(1)
-                .font(.system(size: 12))
+                .scaledFont(size: 12)
                 .foregroundColor(.primary.opacity(0.85))
                 .truncationMode(.middle)
                 .frame(width: textWidth, alignment: .leading)

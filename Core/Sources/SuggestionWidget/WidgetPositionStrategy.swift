@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import XcodeInspector
+import ConversationServiceProvider
 
 public struct WidgetLocation: Equatable {
     struct PanelLocation: Equatable {
@@ -357,3 +358,55 @@ enum UpdateLocationStrategy {
     }
 }
 
+public struct CodeReviewLocationStrategy {
+    static func calculateCurrentLineNumber(
+        for originalLineNumber: Int, // 1-based
+        originalLines: [String],
+        currentLines: [String]
+    ) -> Int {
+        let difference = currentLines.difference(from: originalLines)
+
+        let targetIndex = originalLineNumber
+        var adjustment = 0
+
+        for change in difference {
+            switch change {
+            case .insert(let offset, _, _):
+                // Inserted at or before target line
+                if offset <= targetIndex + adjustment {
+                    adjustment += 1
+                }
+            case .remove(let offset, _, _):
+                // Deleted at or before target line
+                if offset <= targetIndex + adjustment {
+                    adjustment -= 1
+                }
+            }
+        }
+
+        return targetIndex + adjustment
+    }
+
+    static func getCurrentLineFrame(
+        editor: AXUIElement, 
+        currentContent: String,
+        comment: ReviewComment, 
+        originalContent: String
+    ) -> (lineNumber: Int?, lineFrame: CGRect?) {
+        let originalLines = originalContent.components(separatedBy: .newlines)
+        let currentLines = currentContent.components(separatedBy: .newlines)
+
+        let originalLineNumber = comment.range.end.line
+        let currentLineNumber = calculateCurrentLineNumber(
+            for: originalLineNumber,
+            originalLines: originalLines,
+            currentLines: currentLines
+        ) // 0-based
+        
+        guard let rect = LocationStrategyHelper.getLineFrame(currentLineNumber, in: editor, with: currentLines) else {
+            return (nil, nil)
+        }
+        
+        return (currentLineNumber, rect)
+    }
+}

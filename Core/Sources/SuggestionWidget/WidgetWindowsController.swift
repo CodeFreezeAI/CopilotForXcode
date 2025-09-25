@@ -7,6 +7,7 @@ import Dependencies
 import Foundation
 import SwiftUI
 import XcodeInspector
+import AXHelper
 
 actor WidgetWindowsController: NSObject {
     let userDefaultsObservers = WidgetUserDefaultsObservers()
@@ -60,6 +61,10 @@ actor WidgetWindowsController: NSObject {
         }.store(in: &cancellable)
 
         xcodeInspector.$focusedEditor.sink { [weak self] editor in
+            Task { @MainActor [weak self] in 
+                self?.store.send(.fixErrorPanel(.onFocusedEditorChanged(editor)))
+            }
+            
             guard let editor else { return }
             Task { [weak self] in await self?.observe(toEditor: editor) }
         }.store(in: &cancellable)
@@ -70,11 +75,56 @@ actor WidgetWindowsController: NSObject {
             }
         }.store(in: &cancellable)
 
+        xcodeInspector.$activeDocumentURL.sink { [weak self] url in 
+            Task { [weak self] in 
+                await self?.updateCodeReviewWindowLocation(.onActiveDocumentURLChanged)
+                _ = await MainActor.run { [weak self] in 
+                    self?.store.send(.codeReviewPanel(.onActiveDocumentURLChanged(url))) 
+                }
+            }
+        }.store(in: &cancellable)
+
         userDefaultsObservers.presentationModeChangeObserver.onChange = { [weak self] in
             Task { [weak self] in
                 await self?.updateWindowLocation(animated: false, immediately: false)
                 await self?.send(.updateColorScheme)
             }
+        }
+        
+        // Observe state change of code review
+        setupCodeReviewPanelObservers()
+        
+        // Observe state change of fix error
+        setupFixErrorPanelObservers()
+    }
+    
+    private func setupCodeReviewPanelObservers() {
+        Task { @MainActor in 
+            let currentIndexPublisher = store.publisher
+                .map(\.codeReviewPanelState.currentIndex)
+                .removeDuplicates()
+                .sink { [weak self] _ in 
+                    Task { [weak self] in
+                        await self?.updateCodeReviewWindowLocation(.onCurrentReviewIndexChanged)
+                    }
+                }
+            
+            let isPanelDisplayedPublisher = store.publisher
+                .map(\.codeReviewPanelState.isPanelDisplayed)
+                .removeDuplicates()
+                .sink { [weak self] isPanelDisplayed in 
+                    Task { [weak self] in 
+                        await self?.updateCodeReviewWindowLocation(.onIsPanelDisplayedChanged(isPanelDisplayed))
+                    }
+                }
+            
+            await self.storeCancellables([currentIndexPublisher, isPanelDisplayedPublisher])
+        }
+    }
+    
+    func storeCancellables(_ newCancellables: [AnyCancellable]) {
+        for cancellable in newCancellables {
+            self.cancellable.insert(cancellable)
         }
     }
 }
@@ -99,6 +149,8 @@ private extension WidgetWindowsController {
                 await hideSuggestionPanelWindow()
             }
             await adjustChatPanelWindowLevel()
+            
+            await updateFixErrorPanelWindowLocation()
         }
         guard currentApplicationProcessIdentifier != app.processIdentifier else { return }
         currentApplicationProcessIdentifier = app.processIdentifier
@@ -153,12 +205,14 @@ private extension WidgetWindowsController {
                     await updateWidgetsAndNotifyChangeOfEditor(immediately: false)
                 case .windowMiniaturized, .windowDeminiaturized:
                     await updateWidgets(immediately: false)
+                    await updateCodeReviewWindowLocation(.onXcodeAppNotification(notification))
                 case .resized,
                     .moved,
                     .windowMoved,
                     .windowResized:
                     await updateWidgets(immediately: false)
                     await updateAttachedChatWindowLocation(notification)
+                    await updateCodeReviewWindowLocation(.onXcodeAppNotification(notification))
                 case .created, .uiElementDestroyed, .xcodeCompletionPanelChanged,
                      .applicationDeactivated:
                     continue
@@ -176,11 +230,14 @@ private extension WidgetWindowsController {
                 .filter { $0.kind == .selectedTextChanged }
             let scroll = await editor.axNotifications.notifications()
                 .filter { $0.kind == .scrollPositionChanged }
+            let valueChange = await editor.axNotifications.notifications()
+                .filter { $0.kind == .valueChanged }
 
             if #available(macOS 13.0, *) {
                 for await notification in merge(
                     scroll,
-                    selectionRangeChange.debounce(for: Duration.milliseconds(0))
+                    selectionRangeChange.debounce(for: Duration.milliseconds(0)),
+                    valueChange.debounce(for: Duration.milliseconds(100))
                 ) {
                     guard await xcodeInspector.safe.latestActiveXcode != nil else { return }
                     try Task.checkCancellation()
@@ -192,9 +249,12 @@ private extension WidgetWindowsController {
 
                     updateWindowLocation(animated: false, immediately: false)
                     updateWindowOpacity(immediately: false)
+                    await updateCodeReviewWindowLocation(.onSourceEditorNotification(notification))
+                    
+                    await handleFixErrorEditorNotification(notification: notification)
                 }
             } else {
-                for await notification in merge(selectionRangeChange, scroll) {
+                for await notification in merge(selectionRangeChange, scroll, valueChange) {
                     guard await xcodeInspector.safe.latestActiveXcode != nil else { return }
                     try Task.checkCancellation()
 
@@ -205,6 +265,9 @@ private extension WidgetWindowsController {
 
                     updateWindowLocation(animated: false, immediately: false)
                     updateWindowOpacity(immediately: false)
+                    await updateCodeReviewWindowLocation(.onSourceEditorNotification(notification))
+                    
+                    await handleFixErrorEditorNotification(notification: notification)
                 }
             }
         }
@@ -240,6 +303,19 @@ extension WidgetWindowsController {
     func hideSuggestionPanelWindow() {
         windows.suggestionPanelWindow.alphaValue = 0
         send(.panel(.hidePanel))
+    }
+
+    @MainActor
+    func hideCodeReviewWindow() {
+        windows.codeReviewPanelWindow.alphaValue = 0
+        windows.codeReviewPanelWindow.setIsVisible(false)
+    }
+    
+    @MainActor
+    func displayCodeReviewWindow() {
+        windows.codeReviewPanelWindow.setIsVisible(true)
+        windows.codeReviewPanelWindow.alphaValue = 1
+        windows.codeReviewPanelWindow.orderFrontRegardless()
     }
 
     func generateWidgetLocation() -> WidgetLocation? {
@@ -462,7 +538,11 @@ extension WidgetWindowsController {
               let currentXcodeRect = currentFocusedWindow.rect,
               let notif = notif
         else { return }
-        
+
+        guard let sourceEditor = await xcodeInspector.safe.focusedEditor,
+              sourceEditor.realtimeWorkspaceURL != nil
+        else { return }
+
         if let previousXcodeApp = (await previousXcodeApp),
            currentXcodeApp.processIdentifier == previousXcodeApp.processIdentifier {
             if currentFocusedWindow.isFullScreen == true {
@@ -556,6 +636,8 @@ extension WidgetWindowsController {
             }
 
             await adjustChatPanelWindowLevel()
+            
+            await updateFixErrorPanelWindowLocation()
         }
 
         let now = Date()
@@ -633,6 +715,135 @@ extension WidgetWindowsController {
 
             window.setFloatOnTop(overlap)
         }
+    }
+}
+
+// MARK: - Code Review 
+extension WidgetWindowsController {
+    
+    enum CodeReviewLocationTrigger {
+        case onXcodeAppNotification(XcodeAppInstanceInspector.AXNotification) // resized, moved
+        case onSourceEditorNotification(SourceEditor.AXNotification) // scroll, valueChange
+        case onActiveDocumentURLChanged
+        case onCurrentReviewIndexChanged
+        case onIsPanelDisplayedChanged(Bool)
+        
+        static let relevantXcodeAppNotificationKind: [XcodeAppInstanceInspector.AXNotificationKind] =
+            [
+                .windowMiniaturized,
+                .windowDeminiaturized,
+                .resized,
+                .moved,
+                .windowMoved,
+                .windowResized
+            ]
+        
+        static let relevantSourceEditorNotificationKind: [SourceEditor.AXNotificationKind] =
+            [.scrollPositionChanged, .valueChanged]
+        
+        var isRelevant: Bool {
+            switch self {
+            case .onActiveDocumentURLChanged, .onCurrentReviewIndexChanged, .onIsPanelDisplayedChanged: return true
+            case let .onSourceEditorNotification(notif):
+                return Self.relevantSourceEditorNotificationKind.contains(where: { $0 == notif.kind })
+            case let .onXcodeAppNotification(notif):
+                return Self.relevantXcodeAppNotificationKind.contains(where: { $0 == notif.kind })
+            }
+        }
+        
+        var shouldScroll: Bool {
+            switch self {
+            case .onCurrentReviewIndexChanged: return true
+            default: return false
+            }
+        }
+    }
+    
+    @MainActor
+    func updateCodeReviewWindowLocation(_ trigger: CodeReviewLocationTrigger) async {
+        guard trigger.isRelevant else { return }
+        if case .onIsPanelDisplayedChanged(let isPanelDisplayed) = trigger, !isPanelDisplayed { 
+            hideCodeReviewWindow()
+            return
+        }
+        
+        var sourceEditorElement: AXUIElement?
+        
+        switch trigger {
+        case .onXcodeAppNotification(let notif):
+            sourceEditorElement = notif.element.retrieveSourceEditor()
+        case .onSourceEditorNotification(_), 
+                .onActiveDocumentURLChanged, 
+                .onCurrentReviewIndexChanged, 
+                .onIsPanelDisplayedChanged:
+            sourceEditorElement = await xcodeInspector.safe.focusedEditor?.element
+        }
+        
+        guard let sourceEditorElement = sourceEditorElement
+        else {
+            hideCodeReviewWindow()
+            return
+        }
+        
+        await _updateCodeReviewWindowLocation(
+            sourceEditorElement,
+            shouldScroll: trigger.shouldScroll
+        )
+    }
+    
+    @MainActor
+    func _updateCodeReviewWindowLocation(_ sourceEditorElement: AXUIElement, shouldScroll: Bool = false) async {
+        // Get the current index and comment from the store state
+        let state = store.withState { $0.codeReviewPanelState }
+                
+        guard state.isPanelDisplayed,
+              let comment = state.currentSelectedComment,
+              await currentXcodeApp?.realtimeDocumentURL?.absoluteString == comment.uri,
+              let reviewWindowFittingSize = windows.codeReviewPanelWindow.contentView?.fittingSize
+        else { 
+            hideCodeReviewWindow()
+            return
+        }
+        
+        guard let originalContent = state.originalContent, 
+              let screen = NSScreen.screens.first(where: { $0.frame.origin == .zero }),
+              let scrollViewRect = sourceEditorElement.parent?.rect,
+              let scrollScreenFrame = sourceEditorElement.parent?.maxIntersectionScreen?.frame,
+              let currentContent: String = try? sourceEditorElement.copyValue(key: kAXValueAttribute)
+        else { return }
+        
+        let result = CodeReviewLocationStrategy.getCurrentLineFrame(
+            editor: sourceEditorElement,
+            currentContent: currentContent,
+            comment: comment,
+            originalContent: originalContent)
+        guard let lineNumber = result.lineNumber, let lineFrame = result.lineFrame
+        else { return }
+        
+        // The line should be visible
+        guard lineFrame.width > 0, lineFrame.height > 0,
+              scrollViewRect.contains(lineFrame)
+        else {
+            if shouldScroll {
+                AXHelper
+                    .scrollSourceEditorToLine(
+                        lineNumber, 
+                        content: currentContent, 
+                        focusedElement: sourceEditorElement
+                    )
+            } else {
+                hideCodeReviewWindow()
+            }
+            return
+        }
+        
+        // Position the code review window near the target line
+        var reviewWindowFrame = windows.codeReviewPanelWindow.frame
+        reviewWindowFrame.origin.x = scrollViewRect.maxX - reviewWindowFrame.width
+        reviewWindowFrame.origin.y = screen.frame.maxY - lineFrame.maxY + screen.frame.minY - reviewWindowFrame.height
+        
+        windows.codeReviewPanelWindow.setFrame(reviewWindowFrame, display: true, animate: true)
+        displayCodeReviewWindow()
     }
 }
 
@@ -800,6 +1011,72 @@ public final class WidgetWindows {
     }()
 
     @MainActor
+    lazy var codeReviewPanelWindow = {
+        let it = CanBecomeKeyWindow(
+            contentRect: .init(
+                x: 0,
+                y: 0,
+                width: Style.codeReviewPanelWidth,
+                height: Style.codeReviewPanelHeight
+            ),
+            styleMask: .borderless,
+            backing: .buffered,
+            defer: true
+        )
+        it.isReleasedWhenClosed = false
+        it.isOpaque = false
+        it.backgroundColor = .clear
+        it.collectionBehavior = [.fullScreenAuxiliary, .transient, .canJoinAllSpaces]
+        it.hasShadow = true
+        it.level = widgetLevel(2)
+        it.contentView = NSHostingView(
+            rootView: CodeReviewPanelView(
+                store: store.scope(
+                    state: \.codeReviewPanelState,
+                    action: \.codeReviewPanel
+                )
+            )
+        )
+        it.canBecomeKeyChecker = { true }
+        it.alphaValue = 0
+        it.setIsVisible(false)
+        return it
+    }()
+    
+    @MainActor
+    lazy var fixErrorPanelWindow = {
+        let it = CanBecomeKeyWindow(
+            contentRect: .init(
+                x: 0,
+                y: 0,
+                width: Style.panelWidth,
+                height: Style.panelHeight
+            ),
+            styleMask: .borderless,
+            backing: .buffered,
+            defer: true
+        )
+        it.isReleasedWhenClosed = false
+        it.isOpaque = false
+        it.backgroundColor = .clear
+        it.collectionBehavior = [.fullScreenAuxiliary, .transient, .canJoinAllSpaces]
+        it.hasShadow = false
+        it.level = widgetLevel(2)
+        it.contentView = NSHostingView(
+            rootView: FixErrorPanelView(
+                store: store.scope(
+                    state: \.fixErrorPanelState,
+                    action: \.fixErrorPanel
+                )
+            ).environment(cursorPositionTracker)
+        )
+        it.canBecomeKeyChecker = { true }
+        it.alphaValue = 0
+        it.setIsVisible(false)
+        return it
+    }()
+    
+    @MainActor
     lazy var chatPanelWindow = {
         let it = ChatPanelWindow(
             store: store.scope(
@@ -857,6 +1134,7 @@ public final class WidgetWindows {
         toastWindow.orderFrontRegardless()
         sharedPanelWindow.orderFrontRegardless()
         suggestionPanelWindow.orderFrontRegardless()
+        fixErrorPanelWindow.orderFrontRegardless()
         if chatPanelWindow.level.rawValue > NSWindow.Level.normal.rawValue {
             chatPanelWindow.orderFrontRegardless()
         }
@@ -876,4 +1154,3 @@ func widgetLevel(_ addition: Int) -> NSWindow.Level {
     minimumWidgetLevel = NSWindow.Level.floating.rawValue
     return .init(minimumWidgetLevel + addition)
 }
-

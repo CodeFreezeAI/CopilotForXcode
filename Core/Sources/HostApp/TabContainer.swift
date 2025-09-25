@@ -5,6 +5,9 @@ import LaunchAgentManager
 import SwiftUI
 import Toast
 import UpdateChecker
+import Client
+import Logger
+import Combine
 
 @MainActor
 public let hostAppStore: StoreOf<HostApp> = .init(initialState: .init(), reducer: { HostApp() })
@@ -13,7 +16,9 @@ public struct TabContainer: View {
     let store: StoreOf<HostApp>
     @ObservedObject var toastController: ToastController
     @State private var tabBarItems = [TabBarItem]()
-    @Binding var tag: Int
+    @State private var isAgentModeFFEnabled = true
+    @State private var isBYOKFFEnabled = true
+    @Binding var tag: TabIndex
 
     public init() {
         toastController = ToastControllerDependencyKey.liveValue
@@ -32,6 +37,23 @@ public struct TabContainer: View {
             set: { store.send(.setActiveTab($0)) }
         )
     }
+    
+    private func updateHostAppFeatureFlags() async {
+        do {
+            let service = try getService()
+            let featureFlags = try await service.getCopilotFeatureFlags()
+            isAgentModeFFEnabled = featureFlags?.agentMode ?? true
+            isBYOKFFEnabled = featureFlags?.byok ?? true
+            if hostAppStore.state.activeTabIndex == .tools && !isAgentModeFFEnabled {
+                hostAppStore.send(.setActiveTab(.general))
+            }
+            if hostAppStore.state.activeTabIndex == .byok && !isBYOKFFEnabled {
+                hostAppStore.send(.setActiveTab(.general))
+            }
+        } catch {
+            Logger.client.error("Failed to get copilot feature flags: \(error)")
+        }
+    }
 
     public var body: some View {
         WithPerceptionTracking {
@@ -39,44 +61,43 @@ public struct TabContainer: View {
                 TabBar(tag: $tag, tabBarItems: tabBarItems)
                     .padding(.bottom, 8)
                 ZStack(alignment: .center) {
-                    GeneralView(store: store.scope(state: \.general, action: \.general))
-                        .tabBarItem(
-                            tag: 0,
-                            title: "General",
-                            image: "CopilotLogo",
-                            isSystemImage: false
-                        )
-                    AdvancedSettings().tabBarItem(
-                        tag: 1,
-                        title: "Advanced",
-                        image: "gearshape.2.fill"
-                    )
-                    MCPConfigView().tabBarItem(
-                        tag: 2,
-                        title: "MCP",
-                        image: "wrench.and.screwdriver.fill"
-                    )
+                    GeneralView(store: store.scope(state: \.general, action: \.general)).tabBarItem(for: .general)
+                    AdvancedSettings().tabBarItem(for: .advanced)
+                    if isAgentModeFFEnabled {
+                        MCPConfigView().tabBarItem(for: .tools)
+                    }
+                    if isBYOKFFEnabled {
+                        BYOKConfigView().tabBarItem(for: .byok)
+                    }
                 }
                 .environment(\.tabBarTabTag, tag)
                 .frame(minHeight: 400)
             }
             .focusable(false)
             .padding(.top, 8)
-            .background(.ultraThinMaterial.opacity(0.01))
-            .background(Color(nsColor: .controlBackgroundColor).opacity(0.4))
+            .background(Color(nsColor: .controlBackgroundColor))
             .handleToast()
             .onPreferenceChange(TabBarItemPreferenceKey.self) { items in
                 tabBarItems = items
             }
             .onAppear {
                 store.send(.appear)
+                Task {
+                    await updateHostAppFeatureFlags()
+                }
             }
+            .onReceive(DistributedNotificationCenter.default()
+                .publisher(for: .gitHubCopilotFeatureFlagsDidChange)) { _ in
+                    Task {
+                        await updateHostAppFeatureFlags()
+                    }
+                }
         }
     }
 }
 
 struct TabBar: View {
-    @Binding var tag: Int
+    @Binding var tag: TabIndex
     fileprivate var tabBarItems: [TabBarItem]
 
     var body: some View {
@@ -95,9 +116,9 @@ struct TabBar: View {
 }
 
 struct TabBarButton: View {
-    @Binding var currentTag: Int
+    @Binding var currentTag: TabIndex
     @State var isHovered = false
-    var tag: Int
+    var tag: TabIndex
     var title: String
     var image: String
     var isSystemImage: Bool = true
@@ -128,7 +149,7 @@ struct TabBarButton: View {
             .padding(.vertical, 4)
             .padding(.top, 4)
             .background(
-                tag == currentTag
+                isSelected
                     ? Color(nsColor: .textColor).opacity(0.1)
                     : Color.clear,
                 in: RoundedRectangle(cornerRadius: 8)
@@ -149,7 +170,7 @@ struct TabBarButton: View {
 
 private struct TabBarTabViewWrapper<Content: View>: View {
     @Environment(\.tabBarTabTag) var tabBarTabTag
-    var tag: Int
+    var tag: TabIndex
     var title: String
     var image: String
     var isSystemImage: Bool = true
@@ -171,25 +192,20 @@ private struct TabBarTabViewWrapper<Content: View>: View {
 }
 
 private extension View {
-    func tabBarItem(
-        tag: Int,
-        title: String,
-        image: String,
-        isSystemImage: Bool = true
-    ) -> some View {
+    func tabBarItem(for tag: TabIndex) -> some View {
         TabBarTabViewWrapper(
             tag: tag,
-            title: title,
-            image: image,
-            isSystemImage: isSystemImage,
+            title: tag.title,
+            image: tag.image,
+            isSystemImage: tag.isSystemImage,
             content: { self }
         )
     }
 }
 
 private struct TabBarItem: Identifiable, Equatable {
-    var id: Int { tag }
-    var tag: Int
+    var id: TabIndex { tag }
+    var tag: TabIndex
     var title: String
     var image: String
     var isSystemImage: Bool = true
@@ -203,11 +219,11 @@ private struct TabBarItemPreferenceKey: PreferenceKey {
 }
 
 private struct TabBarTabTagKey: EnvironmentKey {
-    static var defaultValue: Int = 0
+    static var defaultValue: TabIndex = .general
 }
 
 private extension EnvironmentValues {
-    var tabBarTabTag: Int {
+    var tabBarTabTag: TabIndex {
         get { self[TabBarTabTagKey.self] }
         set { self[TabBarTabTagKey.self] = newValue }
     }

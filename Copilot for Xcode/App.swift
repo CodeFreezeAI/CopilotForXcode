@@ -20,7 +20,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     enum LaunchMode {
         case chat
         case settings
-        case mcp
+        case tools
+        case byok
     }
     
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -48,8 +49,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let launchArgs = CommandLine.arguments
         if launchArgs.contains("--settings") {
             return .settings
-        } else if launchArgs.contains("--mcp") {
-            return .mcp
+        } else if launchArgs.contains("--tools") {
+            return .tools
+        } else if launchArgs.contains("--byok") {
+            return .byok
         } else {
             return .chat
         }
@@ -59,8 +62,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         switch mode {
         case .settings:
             openSettings()
-        case .mcp:
-            openMCPSettings()
+        case .tools:
+            openToolsSettings()
+        case .byok:
+            openBYOKSettings()
         case .chat:
             openChat()
         }
@@ -81,10 +86,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
     
-    private func openMCPSettings() {
+    private func openToolsSettings() {
         DispatchQueue.main.async {
             activateAndOpenSettings()
-            hostAppStore.send(.setActiveTab(2))
+            hostAppStore.send(.setActiveTab(.tools))
+        }
+    }
+    
+    private func openBYOKSettings() {
+        DispatchQueue.main.async {
+            activateAndOpenSettings()
+            hostAppStore.send(.setActiveTab(.byok))
         }
     }
     
@@ -181,13 +193,24 @@ struct CopilotForXcodeApp: App {
         }
         
         DistributedNotificationCenter.default().addObserver(
-            forName: .openMCPSettingsWindowRequest,
+            forName: .openToolsSettingsWindowRequest,
             object: nil,
             queue: .main
         ) { _ in
             DispatchQueue.main.async {
                 activateAndOpenSettings()
-                hostAppStore.send(.setActiveTab(2))
+                hostAppStore.send(.setActiveTab(.tools))
+            }
+        }
+        
+        DistributedNotificationCenter.default().addObserver(
+            forName: .openBYOKSettingsWindowRequest,
+            object: nil,
+            queue: .main
+        ) { _ in
+            DispatchQueue.main.async {
+                activateAndOpenSettings()
+                hostAppStore.send(.setActiveTab(.byok))
             }
         }
     }

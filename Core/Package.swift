@@ -53,8 +53,7 @@ let package = Package(
             .package(url: "https://github.com/devm33/KeyboardShortcuts", branch: "main"),
         .package(url: "https://github.com/devm33/CGEventOverride", branch: "devm33/fix-stale-AXIsProcessTrusted"),
         .package(url: "https://github.com/devm33/Highlightr", branch: "master"),
-        .package(url: "https://github.com/globulus/swiftui-flow-layout",
-                 from: "1.0.5")
+        .package(url: "https://github.com/globulus/swiftui-flow-layout", from: "1.0.5")
     ],
     targets: [
         // MARK: - Main
@@ -182,7 +181,10 @@ let package = Package(
                     .product(name: "Workspace", package: "Tool"),
                     .product(name: "Terminal", package: "Tool"),
                     .product(name: "SystemUtils", package: "Tool"),
-                    .product(name: "AppKitExtension", package: "Tool")
+                    .product(name: "AppKitExtension", package: "Tool"),
+                    .product(name: "WebContentExtractor", package: "Tool"),
+                    .product(name: "GitHelper", package: "Tool"),
+                    .product(name: "SuggestionBasic", package: "Tool")
                 ]),
             .testTarget(
                 name: "ChatServiceTests",
@@ -202,8 +204,7 @@ let package = Package(
                     .product(name: "MarkdownUI", package: "swift-markdown-ui"),
                     .product(name: "ComposableArchitecture", package: "swift-composable-architecture"),
                     .product(name: "SwiftUIFlowLayout", package: "swiftui-flow-layout"),
-                    .product(name: "Persist", package: "Tool"),
-                    .product(name: "Terminal", package: "Tool")
+                    .product(name: "Persist", package: "Tool")
                 ]
             ),
         

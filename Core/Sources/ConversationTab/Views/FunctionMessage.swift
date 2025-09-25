@@ -73,6 +73,7 @@ struct FunctionMessage: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.regular)
+                .scaledFont(.body)
                 .onHover { isHovering in
                     if isHovering {
                         NSCursor.pointingHand.push()

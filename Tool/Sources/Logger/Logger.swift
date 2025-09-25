@@ -12,6 +12,7 @@ public final class Logger {
     private let category: String
     private let osLog: OSLog
     private let fileLogger = FileLogger()
+    private static let mcpRuntimeFileLogger = MCPRuntimeFileLogger()
 
     public static let service = Logger(category: "Service")
     public static let ui = Logger(category: "UI")
@@ -24,6 +25,7 @@ public final class Logger {
     public static let `extension` = Logger(category: "Extension")
     public static let communicationBridge = Logger(category: "CommunicationBridge")
     public static let workspacePool = Logger(category: "WorkspacePool")
+    public static let mcp = Logger(category: "MCP")
     public static let debug = Logger(category: "Debug")
     public static var telemetryLogger: TelemetryLoggerProvider? = nil
     #if DEBUG
@@ -57,7 +59,9 @@ public final class Logger {
         }
 
         os_log("%{public}@", log: osLog, type: osLogType, message as CVarArg)
-        fileLogger.log(level: level, category: category, message: message)
+        if category != "MCP" {
+            fileLogger.log(level: level, category: category, message: message)
+        }
         
         if osLogType == .error {
             if let error = error {
@@ -138,6 +142,25 @@ public final class Logger {
             function: function,
             callStackSymbols: callStackSymbols
         )
+    }
+
+    public static func logMCPRuntime(
+        logFileName: String,
+        level: String,
+        message: String,
+        server: String,
+        tool: String? = nil,
+        time: Double
+    ) {
+        mcpRuntimeFileLogger
+            .log(
+                logFileName: logFileName,
+                level: level,
+                message: message,
+                server: server,
+                tool: tool,
+                time: time
+            )
     }
 
     public func signpostBegin(

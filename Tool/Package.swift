@@ -22,6 +22,7 @@ let package = Package(
         .library(name: "Persist", targets: ["Persist"]),
         .library(name: "UserDefaultsObserver", targets: ["UserDefaultsObserver"]),
         .library(name: "Workspace", targets: ["Workspace", "WorkspaceSuggestionService"]),
+        .library(name: "WebContentExtractor", targets: ["WebContentExtractor"]),
         .library(
             name: "SuggestionProvider",
             targets: ["SuggestionProvider"]
@@ -63,15 +64,16 @@ let package = Package(
         .library(name: "Cache", targets: ["Cache"]),
         .library(name: "StatusBarItemView", targets: ["StatusBarItemView"]),
         .library(name: "HostAppActivator", targets: ["HostAppActivator"]),
-        .library(name: "AppKitExtension", targets: ["AppKitExtension"])
+        .library(name: "AppKitExtension", targets: ["AppKitExtension"]),
+        .library(name: "GitHelper", targets: ["GitHelper"])
     ],
     dependencies: [
         // TODO: Update LanguageClient some day.
-        .package(url: "https://github.com/ChimeHQ/LanguageClient", exact: "0.3.1"),
-        .package(url: "https://github.com/ChimeHQ/LanguageServerProtocol", exact: "0.8.0"),
+        .package(url: "https://github.com/ChimeHQ/LanguageClient", exact: "0.8.2"),
+        .package(url: "https://github.com/ChimeHQ/LanguageServerProtocol", exact: "0.13.3"),
         .package(url: "https://github.com/apple/swift-async-algorithms", from: "1.0.0"),
         .package(url: "https://github.com/pointfreeco/swift-parsing", from: "0.12.1"),
-        .package(url: "https://github.com/ChimeHQ/JSONRPC", exact: "0.6.0"),
+        .package(url: "https://github.com/ChimeHQ/JSONRPC", exact: "0.9.0"),
         .package(url: "https://github.com/devm33/Highlightr", branch: "master"),
         .package(
             url: "https://github.com/pointfreeco/swift-composable-architecture",
@@ -80,7 +82,8 @@ let package = Package(
         .package(url: "https://github.com/GottaGetSwifty/CodableWrappers", from: "2.0.7"),
         // TODO: remove CopilotForXcodeKit dependency once extension provider logic is removed.
         .package(url: "https://github.com/devm33/CopilotForXcodeKit", branch: "main"),
-        .package(url: "https://github.com/stephencelis/SQLite.swift", from: "0.15.3")
+        .package(url: "https://github.com/stephencelis/SQLite.swift", from: "0.15.3"),
+        .package(url: "https://github.com/scinfu/SwiftSoup.git", from: "2.9.6")
     ],
     targets: [
         // MARK: - Helpers
@@ -92,6 +95,8 @@ let package = Package(
         .target(name: "Preferences", dependencies: ["Configs"]),
 
         .target(name: "Terminal", dependencies: ["Logger", "SystemUtils"]),
+        
+        .target(name: "WebContentExtractor", dependencies: ["Logger", "SwiftSoup", "Preferences"]),
 
         .target(name: "Logger"),
 
@@ -135,6 +140,7 @@ let package = Package(
             name: "SuggestionBasic",
             dependencies: [
                 "LanguageClient",
+                "AXExtension",
                 .product(name: "Parsing", package: "swift-parsing"),
                 .product(name: "CodableWrappers", package: "CodableWrappers"),
             ]
@@ -250,7 +256,7 @@ let package = Package(
 
         .target(
             name: "Status",
-            dependencies: ["Cache"]
+            dependencies: ["Cache", "Preferences"]
         ),
 
         .target(
@@ -272,6 +278,7 @@ let package = Package(
         .testTarget(name: "SuggestionProviderTests", dependencies: ["SuggestionProvider"]),
         
         .target(name: "ConversationServiceProvider", dependencies: [
+            "GitHelper",
             .product(name: "CopilotForXcodeKit", package: "CopilotForXcodeKit"),
             .product(name: "LanguageServerProtocol", package: "LanguageServerProtocol"),
         ]),
@@ -356,7 +363,17 @@ let package = Package(
         
         // MARK: - AppKitExtension
         
-        .target(name: "AppKitExtension")
+        .target(name: "AppKitExtension", dependencies: ["Logger"]),
+        
+        // MARK: - GitHelper
+        .target(
+            name: "GitHelper",
+            dependencies: [
+                "Terminal",
+                .product(name: "LanguageServerProtocol", package: "LanguageServerProtocol")
+            ]
+        ),
+        .testTarget(name: "GitHelperTests", dependencies: ["GitHelper"])
     ]
 )
 

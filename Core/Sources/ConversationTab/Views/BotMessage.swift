@@ -19,6 +19,7 @@ struct BotMessage: View {
     let steps: [ConversationProgressStep]
     let editAgentRounds: [AgentRound]
     let panelMessages: [CopilotShowMessageParams]
+    let codeReviewRound: CodeReviewRound?
     
     @Environment(\.colorScheme) var colorScheme
     @AppStorage(\.chatFontSize) var chatFontSize
@@ -80,9 +81,12 @@ struct BotMessage: View {
                 }, label: {
                     HStack(spacing: 4) {
                         Image(systemName: isReferencesPresented ? "chevron.down" : "chevron.right")
+                            .resizable()
+                            .scaledToFit()
+                            .scaledFrame(width: 14, height: 14)
                             
                         Text(MakeReferenceTitle(references: references))
-                            .font(.system(size: chatFontSize))
+                            .scaledFont(size: chatFontSize)
                     }
                     .background {
                         RoundedRectangle(cornerRadius: r - 4)
@@ -112,7 +116,7 @@ struct BotMessage: View {
                 .scaleEffect(0.7)
             
             Text("Working...")
-                .font(.system(size: chatFontSize))
+                .scaledFont(size: chatFontSize)
                 .foregroundColor(.secondary)
         }
     }
@@ -121,7 +125,6 @@ struct BotMessage: View {
         HStack {
             VStack(alignment: .leading, spacing: 8) {
                 CopilotMessageHeader()
-                    .padding(.leading, 6)
                 
                 if !references.isEmpty {
                     WithPerceptionTracking {
@@ -153,6 +156,12 @@ struct BotMessage: View {
                 if !text.isEmpty {
                     ThemedMarkdownText(text: text, chat: chat)
                 }
+                
+                if let codeReviewRound = codeReviewRound {
+                    CodeReviewMainView(
+                        store: chat, round: codeReviewRound
+                    )
+                }
 
                 if !errorMessages.isEmpty {
                     VStack(spacing: 4) {
@@ -180,16 +189,19 @@ struct BotMessage: View {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(text, forType: .string)
                 }
+                .scaledFont(.body)
                 
                 Button("Set as Extra System Prompt") {
                     chat.send(.setAsExtraPromptButtonTapped(id))
                 }
+                .scaledFont(.body)
                 
                 Divider()
                 
                 Button("Delete") {
                     chat.send(.deleteMessageButtonTapped(id))
                 }
+                .scaledFont(.body)
             }
         }
     }
@@ -247,15 +259,15 @@ struct ReferenceList: View {
                             chat.send(.referenceClicked(reference))
                         }) {
                             HStack(spacing: 8) {
-                                drawFileIcon(reference.url)
+                                drawFileIcon(reference.url, isDirectory: reference.isDirectory)
                                     .resizable()
                                     .scaledToFit()
-                                    .frame(width: 16, height: 16)
+                                    .scaledFrame(width: 16, height: 16)
                                 Text(reference.fileName)
                                     .truncationMode(.middle)
                                     .lineLimit(1)
                                     .layoutPriority(1)
-                                    .font(.system(size: chatFontSize))
+                                    .scaledFont(size: chatFontSize)
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                         }
@@ -332,14 +344,16 @@ struct BotMessage_Previews: PreviewProvider {
             references: .init(repeating: .init(
                 uri: "/Core/Sources/ConversationTab/Views/BotMessage.swift",
                 status: .included,
-                kind: .class
+                kind: .class,
+                referenceType: .file
             ), count: 2),
             followUp: ConversationFollowUp(message: "followup question", id: "id", type: "type"),
             errorMessages: ["Sorry, an error occurred while generating a response."],
             chat: .init(initialState: .init(), reducer: { Chat(service: ChatService.service(for: chatTabInfo)) }),
             steps: steps,
             editAgentRounds: agentRounds,
-            panelMessages: []
+            panelMessages: [],
+            codeReviewRound: nil
         )
         .padding()
         .fixedSize(horizontal: true, vertical: true)
@@ -353,32 +367,38 @@ struct ReferenceList_Previews: PreviewProvider {
             .init(
                 uri: "/Core/Sources/ConversationTab/Views/BotMessage.swift",
                 status: .included,
-                kind: .class
+                kind: .class,
+                referenceType: .file
             ),
             .init(
                 uri: "/Core/Sources/ConversationTab/Views",
                 status: .included,
-                kind: .struct
+                kind: .struct,
+                referenceType: .file
             ),
             .init(
                 uri: "/Core/Sources/ConversationTab/Views/BotMessage.swift",
                 status: .included,
-                kind: .function
+                kind: .function,
+                referenceType: .file
             ),
             .init(
                 uri: "/Core/Sources/ConversationTab/Views/BotMessage.swift",
                 status: .included,
-                kind: .case
+                kind: .case,
+                referenceType: .file
             ),
             .init(
                 uri: "/Core/Sources/ConversationTab/Views/BotMessage.swift",
                 status: .included,
-                kind: .extension
+                kind: .extension,
+                referenceType: .file
             ),
             .init(
                 uri: "/Core/Sources/ConversationTab/Views/BotMessage.swift",
                 status: .included,
-                kind: .webpage
+                kind: .webpage,
+                referenceType: .file
             ),
         ], chat: .init(initialState: .init(), reducer: { Chat(service: ChatService.service(for: chatTabInfo)) }))
     }

@@ -249,10 +249,15 @@ public class ConversationTab: ChatTab {
         let pasteboard = NSPasteboard.general
         if let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: nil) as? [URL], !urls.isEmpty {
             for url in urls {
+                // Check if it's a remote URL (http/https)
+                if url.scheme == "http" || url.scheme == "https" {
+                    return false
+                }
+
                 if let isValidFile = try? WorkspaceFile.isValidFile(url), isValidFile {
                     DispatchQueue.main.async {
-                        let fileReference = FileReference(url: url, isCurrentEditor: false)
-                        self.chat.send(.addSelectedFile(fileReference))
+                        let fileReference = ConversationFileReference(url: url, isCurrentEditor: false)
+                        self.chat.send(.addReference(.file(fileReference)))
                     }
                 } else if let data = try? Data(contentsOf: url),
                     ["png", "jpeg", "jpg", "bmp", "gif", "tiff", "tif", "webp"].contains(url.pathExtension.lowercased()) {
@@ -272,6 +277,11 @@ public class ConversationTab: ChatTab {
         }
         
         return true
+    }
+    
+    public func updateChatTabInfo(_ tabInfo: ChatTabInfo) {
+        // Sync tabInfo for service
+        service.updateChatTabInfo(tabInfo)
     }
 }
 

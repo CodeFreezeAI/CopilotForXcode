@@ -1,4 +1,5 @@
 import AppKit
+import Preferences
 import Foundation
 
 @objc public enum ExtensionPermissionStatus: Int {
@@ -87,6 +88,7 @@ public final actor Status {
 
     public func updateAuthStatus(_ status: AuthStatus.Status, username: String? = nil, message: String? = nil) {
         currentUserName = username
+        UserDefaults.shared.set(username ?? "", for: \.currentUserName)
         let newStatus = AuthStatus(status: status, username: username, message: message)
         guard newStatus != authStatus else { return }
         authStatus = newStatus
@@ -119,6 +121,10 @@ public final actor Status {
 
     public func getCLSStatus() -> CLSStatus {
         clsStatus
+    }
+    
+    public func getQuotaInfo() -> GitHubCopilotQuotaInfo? {
+        currentUserQuotaInfo
     }
 
     public func getStatus() -> StatusResponse {

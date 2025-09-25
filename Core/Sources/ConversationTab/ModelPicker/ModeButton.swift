@@ -1,4 +1,5 @@
 import SwiftUI
+import SharedUIComponents
 
 public struct ModeButton: View {
     let title: String
@@ -11,8 +12,9 @@ public struct ModeButton: View {
     public var body: some View {
         Button(action: action) {
             Text(title)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 0)
+                .scaledFont(.body)
+                .scaledPadding(.horizontal, 6)
+                .scaledPadding(.vertical, 0)
                 .frame(maxHeight: .infinity, alignment: .center)
                 .background(isSelected ? activeBackground : Color.clear)
                 .foregroundColor(isSelected ? activeTextColor : inactiveTextColor)

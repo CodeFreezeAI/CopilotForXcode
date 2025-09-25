@@ -186,6 +186,8 @@ public struct ChatPanelFeature {
         case deleteChatTabInfo(id: String, ChatWorkspace)
         case restoreWorkspace(ChatWorkspace)
         
+        case syncChatTabInfo([ChatTabInfo?])
+        
         // ChatWorkspace cleanup
         case scheduleLRUCleanup(ChatWorkspace)
         case performLRUCleanup(ChatWorkspace)
@@ -375,6 +377,7 @@ public struct ChatPanelFeature {
                 return .run { send in
                     await send(.focusActiveChatTab)
                     await send(.saveChatTabInfo([originalTab, currentTab], workspace))
+                    await send(.syncChatTabInfo([originalTab, currentTab]))
                 }
                 
             case let .chatHistoryItemClicked(id):
@@ -413,6 +416,8 @@ public struct ChatPanelFeature {
                         }
                         
                         await send(.saveChatTabInfo([originalTab, currentTab], workspace))
+                        
+                        await send(.syncChatTabInfo([originalTab, currentTab]))
                     }
                 }
                 
@@ -435,6 +440,7 @@ public struct ChatPanelFeature {
                     await send(.focusActiveChatTab)
                     await send(.saveChatTabInfo([originalTab, currentTab], currentChatWorkspace))
                     await send(.scheduleLRUCleanup(currentChatWorkspace))
+                    await send(.syncChatTabInfo([originalTab, currentTab]))
                 }
             case .appendTabToWorkspace(var tab, let chatWorkspace):
                 guard !chatWorkspace.tabInfo.contains(where: { $0.id == tab.id })
@@ -448,6 +454,7 @@ public struct ChatPanelFeature {
                 return .run { send in
                     await send(.saveChatTabInfo([originalTab, currentTab], currentChatWorkspace))
                     await send(.scheduleLRUCleanup(currentChatWorkspace))
+                    await send(.syncChatTabInfo([originalTab, currentTab]))
                 }
 
 //            case .switchToNextTab:
@@ -613,6 +620,15 @@ public struct ChatPanelFeature {
                 }
                 
                 state.chatHistory.addWorkspace(chatWorkspace)
+                return .none
+                
+            case .syncChatTabInfo(let tabInfos):
+                for tabInfo in tabInfos {
+                    guard let tabInfo = tabInfo else { continue }
+                    if let conversationTab = chatTabPool.getTab(of: tabInfo.id) as? ConversationTab {
+                        conversationTab.updateChatTabInfo(tabInfo)
+                    }
+                }
                 return .none
                 
             // MARK: - Clean up ChatWorkspace

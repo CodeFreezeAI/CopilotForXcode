@@ -3,6 +3,7 @@ import ComposableArchitecture
 import Persist
 import ConversationServiceProvider
 import GitHubCopilotService
+import SharedUIComponents
 
 public struct HoverableImageView: View {
     @Environment(\.colorScheme) var colorScheme
@@ -53,7 +54,7 @@ public struct HoverableImageView: View {
         }) {
             Image(systemName: "xmark")
                 .foregroundColor(.primary)
-                .font(.system(size: 13))
+                .scaledFont(.system(size: 13))
                 .frame(width: 24, height: 24)
                 .background(
                     RoundedRectangle(cornerRadius: hoverableImageCornerRadius)

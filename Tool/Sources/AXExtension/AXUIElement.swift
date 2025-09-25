@@ -245,6 +245,19 @@ public extension AXUIElement {
     var verticalScrollBar: AXUIElement? {
         try? copyValue(key: kAXVerticalScrollBarAttribute)
     }
+    
+    func retrieveSourceEditor() -> AXUIElement? {
+        if self.isSourceEditor { return self }
+        
+        if self.isXcodeWorkspaceWindow {
+            return self.firstChild(where: \.isSourceEditor)
+        }
+        
+        guard let xcodeWorkspaceWindowElement = self.firstParent(where: \.isXcodeWorkspaceWindow)
+        else { return nil }
+        
+        return xcodeWorkspaceWindowElement.firstChild(where: \.isSourceEditor)
+    }
 }
 
 public extension AXUIElement {
@@ -318,6 +331,56 @@ public extension AXUIElement {
             return value
         }
         throw error
+    }
+}
+
+// MARK: - Xcode Specific
+public extension AXUIElement {
+    func findSourceEditorElement(shouldRetry: Bool = true) -> AXUIElement? {
+        
+        // 1. Check if the current element is a source editor
+        if isSourceEditor {
+            return self
+        }
+        
+        // 2. Search for child that is a source editor
+        if let sourceEditorChild = firstChild(where: \.isSourceEditor) {
+            return sourceEditorChild
+        }
+        
+        // 3. Search for parent that is a source editor (XcodeInspector's approach)
+        if let sourceEditorParent = firstParent(where: \.isSourceEditor) {
+            return sourceEditorParent
+        }
+        
+        // 4. Search for parent that is an editor area
+        if let editorAreaParent = firstParent(where: \.isEditorArea) {
+            // 3.1 Search for child that is a source editor
+            if let sourceEditorChild = editorAreaParent.firstChild(where: \.isSourceEditor) {
+                return sourceEditorChild
+            }
+        }
+        
+        // 5. Search for the workspace window
+        if let xcodeWorkspaceWindowParent = firstParent(where: \.isXcodeWorkspaceWindow) {
+            // 4.1 Search for child that is an editor area
+            if let editorAreaChild = xcodeWorkspaceWindowParent.firstChild(where: \.isEditorArea) {
+                // 4.2 Search for child that is a source editor
+                if let sourceEditorChild = editorAreaChild.firstChild(where: \.isSourceEditor) {
+                    return sourceEditorChild
+                }
+            }
+        }
+        
+        // 6. retry
+        if shouldRetry {
+            Thread.sleep(forTimeInterval: 0.5)
+            return findSourceEditorElement(shouldRetry: false)
+        }
+        
+        
+        return nil
+        
     }
 }
 

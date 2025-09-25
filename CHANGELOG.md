@@ -5,6 +5,53 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.43.0 - September 4, 2025
+### Fixed
+- Cannot type non-Latin characters in the chat input field.
+
+## 0.42.0 - September 3, 2025
+### Added
+- Support for Bring Your Own Keys (BYOK) with model providers including Azure, OpenAI, Anthropic, Gemini, Groq, and OpenRouter. See [BYOK.md](https://github.com/github/CopilotForXcode/blob/0.42.0/Docs/BYOK.md).
+- Use the current selection as chat context.
+- Add folders as chat context.
+- Shortcut to quickly fix errors in Xcode.
+- Support for custom instruction files at `.github/instructions/*.instructions.md`. See [CustomInstructions.md](https://github.com/github/CopilotForXcode/blob/0.42.0/Docs/CustomInstructions.md).
+- Support for prompt files at `.github/prompts/*.prompt.md`. See [PromptFiles.md](https://github.com/github/CopilotForXcode/blob/0.42.0/Docs/PromptFiles.md).
+- Use ↑/↓ keys to reuse previous chat context in the chat view.
+
+### Changed
+- Default chat mode is now set to “Agent”.
+
+### Fixed
+- Cannot copy url from Safari browser to chat view.
+
+## 0.41.0 - August 14, 2025
+### Added
+- Code review feature.
+- Chat: Support for new model GPT-5.
+- Agent mode: Added support for new tool to read web URL contents.
+- Support disabling MCP when it's disabled by policy.
+- Support for opening MCP logs directly from the MCP settings page.
+- OAuth support for remote GitHub MCP server.
+
+### Changed
+- Performance: Improved instant-apply speed for edit_file tool.
+
+### Fixed
+- Chat Agent repeatedly reverts its own changes when editing the same file.
+- Performance: Avoid chat panel being stuck when sending a large text for chat.
+
+## 0.40.0 - July 24, 2025
+### Added
+- Support disabling Agent mode when it's disabled by policy.
+
+## 0.39.0 - July 23, 2025
+### Fixed
+- Performance: Fixed a freezing issue in 'Add Context' view when opening large projects.
+- Login failed due to insufficient permissions on the .config folder.
+- Fixed an issue that setting changes like proxy config did not take effect.
+- Increased the timeout for ask mode to prevent response failures due to timeout.
+
 ## 0.38.0 - June 30, 2025
 ### Added
 - Support for Claude 4 in Chat.

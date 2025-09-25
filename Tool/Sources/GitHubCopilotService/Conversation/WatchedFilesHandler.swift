@@ -4,6 +4,7 @@ import Workspace
 import XcodeInspector
 import Foundation
 import ConversationServiceProvider
+import LanguageServerProtocol
 
 public protocol WatchedFilesHandler {
     func handleWatchedFiles(_ request: WatchedFilesRequest, workspaceURL: URL, completion: @escaping (AnyJSONRPCResponse) -> Void, service: GitHubCopilotService?)
@@ -54,26 +55,57 @@ public final class WatchedFilesHandlerImpl: WatchedFilesHandler {
 
     func startFileChangeWatcher(workspaceURL: URL, projectURL: URL, service: GitHubCopilotService?) {
         Task {
+            WorkspaceDirectoryIndex.shared.initIndexFor(workspaceURL, projectURL: projectURL)
+            
             await FileChangeWatcherServicePool.shared.watch(
-                for: workspaceURL
-            ) { fileEvents in
-                // Update the local file index with file events
-                fileEvents.forEach { event in
-                    let fileURL = URL(string: event.uri)!
-                    let relativePath = fileURL.path.replacingOccurrences(of: projectURL.path, with: "")
-                    let fileName = fileURL.lastPathComponent
-                    let file = FileReference(url: fileURL, relativePath: relativePath, fileName: fileName)
-                    if event.type == .deleted {
-                        WorkspaceFileIndex.shared.removeFile(file, from: workspaceURL)
-                    } else {
-                        WorkspaceFileIndex.shared.addFile(file, to: workspaceURL)
-                    }
+                for: workspaceURL,
+                publisher: { fileEvents in
+                    self.onFileEvents(
+                        fileEvents: fileEvents,
+                        workspaceURL: workspaceURL,
+                        projectURL: projectURL,
+                        service: service)
+                },
+                directoryChangePublisher: { directoryEvents in 
+                    self.onDirectoryEvent(
+                        directoryEvents: directoryEvents,
+                        workspaceURL: workspaceURL,
+                        projectURL: projectURL)
                 }
-
-                Task {
-                    try? await service?.notifyDidChangeWatchedFiles(
-                        .init(workspaceUri: projectURL.path, changes: fileEvents))
-                }
+            )
+        }
+    }
+    
+    private func onFileEvents(fileEvents: [FileEvent], workspaceURL: URL, projectURL: URL, service: GitHubCopilotService?) {
+        // Update the local file index with file events
+        fileEvents.forEach { event in
+            let fileURL = URL(string: event.uri)!
+            let relativePath = fileURL.path.replacingOccurrences(of: projectURL.path, with: "")
+            let fileName = fileURL.lastPathComponent
+            let file = ConversationFileReference(url: fileURL, relativePath: relativePath, fileName: fileName)
+            if event.type == .deleted {
+                WorkspaceFileIndex.shared.removeFile(file, from: workspaceURL)
+            } else {
+                WorkspaceFileIndex.shared.addFile(file, to: workspaceURL)
+            }
+        }
+        
+        Task {
+            try? await service?.notifyDidChangeWatchedFiles(
+                .init(workspaceUri: projectURL.path, changes: fileEvents))
+        }
+    }
+    
+    private func onDirectoryEvent(directoryEvents: [FileEvent], workspaceURL: URL, projectURL: URL) {
+        directoryEvents.forEach { event in 
+            guard let directoryURL = URL(string: event.uri) else {
+                return
+            }
+            let directory = ConversationDirectoryReference(url: directoryURL, projectURL: projectURL)
+            if event.type == .deleted {
+                WorkspaceDirectoryIndex.shared.removeDirectory(directory, from: workspaceURL)
+            } else {
+                WorkspaceDirectoryIndex.shared.addDirectory(directory, to: workspaceURL)
             }
         }
     }

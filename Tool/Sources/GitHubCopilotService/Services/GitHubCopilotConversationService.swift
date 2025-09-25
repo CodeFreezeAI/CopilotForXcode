@@ -6,6 +6,10 @@ import Workspace
 import LanguageServerProtocol
 
 public final class GitHubCopilotConversationService: ConversationServiceType {
+    public func notifyChangeTextDocument(fileURL: URL, content: String, version: Int, workspace: WorkspaceInfo) async throws {
+        guard let service = await serviceLocator.getService(from: workspace) else { return }
+        try await service.notifyChangeTextDocument(fileURL: fileURL, content: content, version: version)
+    }
 
     private let serviceLocator: ServiceLocator
     
@@ -50,6 +54,7 @@ public final class GitHubCopilotConversationService: ConversationServiceType {
                                                     ignoredSkills: request.ignoredSkills,
                                                     references: request.references ?? [],
                                                     model: request.model,
+                                                    modelProviderName: request.modelProviderName,
                                                     turns: request.turns,
                                                     agentMode: request.agentMode,
                                                     userLanguage: request.userLanguage)
@@ -68,6 +73,7 @@ public final class GitHubCopilotConversationService: ConversationServiceType {
                                             ignoredSkills: request.ignoredSkills,
                                             references: request.references ?? [],
                                             model: request.model,
+                                            modelProviderName: request.modelProviderName,
                                             workspaceFolder: workspace.projectURL.absoluteString,
                                             workspaceFolders: getWorkspaceFolders(workspace: workspace),
                                             agentMode: request.agentMode)
@@ -91,7 +97,9 @@ public final class GitHubCopilotConversationService: ConversationServiceType {
 
     public func templates(workspace: WorkspaceInfo) async throws -> [ChatTemplate]? {
         guard let service = await serviceLocator.getService(from: workspace) else { return nil }
-        return try await service.templates()
+        let isPreviewEnabled = FeatureFlagNotifierImpl.shared.featureFlags.editorPreviewFeatures
+        let workspaceFolders = isPreviewEnabled ? getWorkspaceFolders(workspace: workspace) : nil
+        return try await service.templates(workspaceFolders: workspaceFolders)
     }
 
     public func models(workspace: WorkspaceInfo) async throws -> [CopilotModel]? {
@@ -110,6 +118,12 @@ public final class GitHubCopilotConversationService: ConversationServiceType {
     public func agents(workspace: WorkspaceInfo) async throws -> [ChatAgent]? {
         guard let service = await serviceLocator.getService(from: workspace) else { return nil }
         return try await service.agents()
+    }
+    
+    public func reviewChanges(workspace: WorkspaceInfo, params: ReviewChangesParams) async throws -> CodeReviewResult? {
+        guard let service = await serviceLocator.getService(from: workspace) else { return nil }
+        
+        return try await service.reviewChanges(params: params)
     }
 }
 

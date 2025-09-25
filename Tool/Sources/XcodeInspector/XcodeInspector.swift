@@ -290,20 +290,8 @@ public final class XcodeInspector: ObservableObject {
         let setFocusedElement = { @XcodeInspectorActor [weak self] in
             guard let self else { return }
 
-            func getFocusedElementAndRecordStatus(_ element: AXUIElement) -> AXUIElement? {
-                do {
-                    let focused: AXUIElement = try element.copyValue(key: kAXFocusedUIElementAttribute)
-                    Task { await Status.shared.updateAXStatus(.granted) }
-                    return focused
-                } catch AXError.apiDisabled {
-                    Task { await Status.shared.updateAXStatus(.notGranted) }
-                } catch {
-                    // ignore
-                }
-                return nil
-            }
-
-            focusedElement = getFocusedElementAndRecordStatus(xcode.appElement)
+            focusedElement = xcode.getFocusedElement(shouldRecordStatus: true)
+            
             if let editorElement = focusedElement, editorElement.isSourceEditor {
                 focusedEditor = .init(
                     runningApplication: xcode.runningApplication,
@@ -319,6 +307,7 @@ public final class XcodeInspector: ObservableObject {
             } else {
                 focusedEditor = nil
             }
+
         }
 
         setFocusedElement()

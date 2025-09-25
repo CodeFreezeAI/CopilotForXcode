@@ -16,3 +16,11 @@ public func drawFileIcon(_ file: URL?) -> Image {
 
     return defaultImage
 }
+
+public func drawFileIcon(_ file: URL?, isDirectory: Bool = false) -> Image {
+    if isDirectory {
+        return Image(systemName: "folder")
+    } else {
+        return drawFileIcon(file)
+    }
+}

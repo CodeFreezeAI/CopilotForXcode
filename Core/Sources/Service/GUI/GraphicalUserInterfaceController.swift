@@ -281,6 +281,7 @@ struct GUI {
                             await send(.openChatPanel(forceDetach: false))
                             await stopAndHandleCommand(chatTab)
                             await send(.suggestionWidget(.chatPanel(.saveChatTabInfo([originalTab, currentTab], chatWorkspace))))
+                            await send(.suggestionWidget(.chatPanel(.syncChatTabInfo([originalTab, currentTab]))))
                         }
                     }
 

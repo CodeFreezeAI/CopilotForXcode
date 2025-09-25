@@ -5,4 +5,5 @@ public enum ToolName: String {
     case getErrors = "get_errors"
     case insertEditIntoFile = "insert_edit_into_file"
     case createFile = "create_file"
+    case fetchWebPage = "fetch_webpage"
 }

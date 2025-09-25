@@ -1,17 +1,20 @@
-### GitHub Copilot for Xcode 0.38.0
+### GitHub Copilot for Xcode 0.42.0
 
 **🚀 Highlights**
 
-* Support for Claude 4 in Chat.
-* Support for Copilot Vision (image attachments).
-* Support for remote MCP servers.
+* Support for Bring Your Own Keys (BYOK) with model providers including Azure, OpenAI, Anthropic, Gemini, Groq, and OpenRouter. See [BYOK.md](https://github.com/github/CopilotForXcode/blob/0.42.0/Docs/BYOK.md).
+* Support for custom instruction files at `.github/instructions/*.instructions.md`. See [CustomInstructions.md](https://github.com/github/CopilotForXcode/blob/0.42.0/Docs/CustomInstructions.md).
+* Support for prompt files at `.github/prompts/*.prompt.md`. See [PromptFiles.md](https://github.com/github/CopilotForXcode/blob/0.42.0/Docs/PromptFiles.md).
+* Default chat mode is now set to “Agent”.
+
 
 **💪 Improvements**
-* Automatically suggests a title for conversations created in agent mode.
-* Improved restoration of MCP tool status after Copilot restarts.
-* Reduced duplication of MCP server instances.
+
+* Use the current selection as chat context.
+* Add folders as chat context.
+* Shortcut to quickly fix errors in Xcode.
+* Use ↑/↓ keys to reuse previous chat context in the chat view.
 
 **🛠️ Bug Fixes**
 
-* Switching accounts now correctly refreshes the auth token and models.
-* Fixed file create/edit issues in agent mode.
+* Cannot copy url from Safari browser to chat view.

@@ -27,7 +27,7 @@ struct CopilotIntroItem: View {
                 .renderingMode(.template)
                 .foregroundColor(.blue)
                 .scaledToFit()
-                .frame(width: 28, height: 28)
+                .scaledFrame(width: 28, height: 28)
             VStack(alignment: .leading, spacing: 5) {
                 Text(heading)
                     .font(.system(size: 11, weight: .bold))

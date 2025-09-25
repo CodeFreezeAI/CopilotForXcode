@@ -5,31 +5,63 @@ import ChatService
 import ComposableArchitecture
 import SuggestionBasic
 import ChatTab
+import SharedUIComponents
 
-struct ThemedMarkdownText: View {
+public struct MarkdownActionProvider {
+    let supportInsert: Bool
+    let onInsert: ((String) -> Void)?
+    
+    public init(supportInsert: Bool = true, onInsert: ((String) -> Void)? = nil) {
+        self.supportInsert = supportInsert
+        self.onInsert = onInsert
+    }
+}
+
+public struct ThemedMarkdownText: View {
     @AppStorage(\.syncChatCodeHighlightTheme) var syncCodeHighlightTheme
     @AppStorage(\.codeForegroundColorLight) var codeForegroundColorLight
     @AppStorage(\.codeBackgroundColorLight) var codeBackgroundColorLight
     @AppStorage(\.codeForegroundColorDark) var codeForegroundColorDark
     @AppStorage(\.codeBackgroundColorDark) var codeBackgroundColorDark
     @AppStorage(\.chatFontSize) var chatFontSize
-    @AppStorage(\.chatCodeFont) var chatCodeFont
     @Environment(\.colorScheme) var colorScheme
-
-    let text: String
-    let chat: StoreOf<Chat>
-
-    init(text: String, chat: StoreOf<Chat>) {
-        self.text = text
-        self.chat = chat
+    
+    @StateObject private var fontScaleManager = FontScaleManager.shared
+    
+    var fontScale: Double {
+        fontScaleManager.currentScale
+    }
+    
+    var scaledChatCodeFont: NSFont {
+        .monospacedSystemFont(ofSize: 12 * fontScale, weight: .regular)
+    }
+    
+    var scaledChatFontSize: CGFloat {
+        chatFontSize * fontScale
     }
 
-    var body: some View {
+    let text: String
+    let context: MarkdownActionProvider
+
+    public init(text: String, context: MarkdownActionProvider) {
+        self.text = text
+        self.context = context
+    }
+    
+    init(text: String, chat: StoreOf<Chat>) {
+        self.text = text
+        
+        self.context = .init(onInsert: { content in 
+            chat.send(.insertCode(content))
+        })
+    }
+
+    public var body: some View {
         Markdown(text)
             .textSelection(.enabled)
             .markdownTheme(.custom(
-                fontSize: chatFontSize,
-                codeFont: chatCodeFont.value.nsFont,
+                fontSize: scaledChatFontSize,
+                codeFont: scaledChatCodeFont,
                 codeBlockBackgroundColor: {
                     if syncCodeHighlightTheme {
                         if colorScheme == .light, let color = codeBackgroundColorLight.value {
@@ -53,7 +85,7 @@ struct ThemedMarkdownText: View {
                     }
                     return Color.secondary.opacity(0.7)
                 }(),
-                chat: chat
+                context: context
             ))
     }
 }
@@ -66,7 +98,7 @@ extension MarkdownUI.Theme {
         codeFont: NSFont,
         codeBlockBackgroundColor: Color,
         codeBlockLabelColor: Color,
-        chat: StoreOf<Chat>
+        context: MarkdownActionProvider
     ) -> MarkdownUI.Theme {
         .gitHub.text {
             ForegroundColor(.primary)
@@ -79,7 +111,7 @@ extension MarkdownUI.Theme {
                 codeFont: codeFont,
                 codeBlockBackgroundColor: codeBlockBackgroundColor,
                 codeBlockLabelColor: codeBlockLabelColor,
-                chat: chat
+                context: context
             )
         }
     }
@@ -90,11 +122,7 @@ struct MarkdownCodeBlockView: View {
     let codeFont: NSFont
     let codeBlockBackgroundColor: Color
     let codeBlockLabelColor: Color
-    let chat: StoreOf<Chat>
-    
-    func insertCode() {
-        chat.send(.insertCode(codeBlockConfiguration.content))
-    }
+    let context: MarkdownActionProvider
     
     var body: some View {
         let wrapCode = UserDefaults.shared.value(for: \.wrapCodeInChatCodeBlock)
@@ -110,8 +138,10 @@ struct MarkdownCodeBlockView: View {
                 codeBlockConfiguration,
                 backgroundColor: codeBlockBackgroundColor,
                 labelColor: codeBlockLabelColor,
-                insertAction: insertCode
+                context: context
             )
+            // Force recreation when font size changes
+            .id("code-block-\(codeFont.pointSize)")
         } else {
             ScrollView(.horizontal) {
                 AsyncCodeBlockView(
@@ -126,8 +156,10 @@ struct MarkdownCodeBlockView: View {
                 codeBlockConfiguration,
                 backgroundColor: codeBlockBackgroundColor,
                 labelColor: codeBlockLabelColor,
-                insertAction: insertCode
+                context: context
             )
+            // Force recreation when font size changes
+            .id("code-block-\(codeFont.pointSize)")
         }
     }
 }
@@ -143,7 +175,7 @@ struct ThemedMarkdownText_Previews: PreviewProvider {
     }
     ```
     """,
-            chat: .init(initialState: .init(), reducer: { Chat(service: ChatService.service(for: chatTabInfo)) }))
+            context: .init(onInsert: {_ in  print("Inserted") }))
     }
 }
 

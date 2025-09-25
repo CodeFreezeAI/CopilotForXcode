@@ -3,6 +3,7 @@ import XcodeInspector
 import ConversationServiceProvider
 import ComposableArchitecture
 import Terminal
+import SharedUIComponents
 
 struct RunInTerminalToolView: View {
     let tool: AgentToolCall
@@ -17,7 +18,6 @@ struct RunInTerminalToolView: View {
     @AppStorage(\.codeBackgroundColorDark) var codeBackgroundColorDark
     @AppStorage(\.codeForegroundColorDark) var codeForegroundColorDark
     @AppStorage(\.chatFontSize) var chatFontSize
-    @AppStorage(\.chatCodeFont) var chatCodeFont
     @Environment(\.colorScheme) var colorScheme
     
     init(tool: AgentToolCall, chat: StoreOf<Chat>) {
@@ -71,11 +71,10 @@ struct RunInTerminalToolView: View {
                         Image("Terminal")
                             .resizable()
                             .scaledToFit()
-                            .frame(width: 16, height: 16)
+                            .scaledFrame(width: 16, height: 16)
 
                         Text(self.title)
-                            .font(.system(size: chatFontSize))
-                            .fontWeight(.semibold)
+                            .scaledFont(size: chatFontSize, weight: .semibold)
                             .foregroundStyle(.primary)
                             .background(Color.clear)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -119,11 +118,11 @@ struct RunInTerminalToolView: View {
                 if command != nil {
                     HStack(spacing: 4) {
                         statusIcon
-                            .frame(width: 16, height: 16)
+                            .scaledFrame(width: 16, height: 16)
 
                         Text(command!)
                             .textSelection(.enabled)
-                            .font(.system(size: chatFontSize, design: .monospaced))
+                            .scaledFont(size: chatFontSize, design: .monospaced)
                             .padding(8)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .foregroundStyle(codeForegroundColor)
@@ -151,10 +150,12 @@ struct RunInTerminalToolView: View {
                         Button("Cancel") {
                             chat.send(.toolCallCancelled(tool.id))
                         }
+                        .scaledFont(.body)
 
                         Button("Continue") {
                             chat.send(.toolCallAccepted(tool.id))
                         }
+                        .scaledFont(.body)
                         .buttonStyle(BorderedProminentButtonStyle())
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)

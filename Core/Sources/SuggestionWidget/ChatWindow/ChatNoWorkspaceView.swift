@@ -13,15 +13,15 @@ struct ChatNoWorkspaceView: View {
                             .resizable()
                             .renderingMode(.template)
                             .scaledToFill()
-                            .frame(width: 64.0, height: 64.0)
+                            .scaledFrame(width: 64.0, height: 64.0)
                             .foregroundColor(.secondary)
                         
                         Text("No Active Xcode Workspace")
-                            .font(.largeTitle)
+                            .scaledFont(.largeTitle)
                             .multilineTextAlignment(.center)
                         
                         Text("To use Copilot, open Xcode with an active workspace in focus")
-                            .font(.body)
+                            .scaledFont(.body)
                             .multilineTextAlignment(.center)
                     }
                     

@@ -3,6 +3,7 @@ import ConversationServiceProvider
 import ComposableArchitecture
 import Combine
 import ChatService
+import SharedUIComponents
 
 struct ProgressStep: View {
     let steps: [ConversationProgressStep]
@@ -30,17 +31,19 @@ struct StatusItemView: View {
             case .running:
                 ProgressView()
                     .controlSize(.small)
-                    .frame(width: 16, height: 16)
-                    .scaleEffect(0.7)
+                    .scaledScaleEffect(0.7)
             case .completed:
                 Image(systemName: "checkmark")
                     .foregroundColor(.green)
+                    .scaledFont(.body)
             case .failed:
                 Image(systemName: "xmark.circle")
                     .foregroundColor(.red)
+                    .scaledFont(.body)
             case .cancelled:
                 Image(systemName: "slash.circle")
                     .foregroundColor(.gray)
+                    .scaledFont(.body)
             }
         }
     }
@@ -57,10 +60,10 @@ struct StatusItemView: View {
         WithPerceptionTracking {
             HStack(spacing: 4) {
                 statusIcon
-                    .frame(width: 16, height: 16)
+                    .scaledFrame(width: 16, height: 16)
                 
                 statusTitle
-                    .font(.system(size: chatFontSize))
+                    .scaledFont(size: chatFontSize)
                     .lineLimit(1)
                 
                 Spacer()

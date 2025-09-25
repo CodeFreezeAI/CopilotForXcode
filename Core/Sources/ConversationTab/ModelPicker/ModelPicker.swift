@@ -8,190 +8,8 @@ import HostAppActivator
 import SharedUIComponents
 import ConversationServiceProvider
 
-public let SELECTED_LLM_KEY = "selectedLLM"
-public let SELECTED_CHATMODE_KEY = "selectedChatMode"
-
-extension Notification.Name {
-    static let gitHubCopilotSelectedModelDidChange = Notification.Name("com.github.CopilotForXcode.SelectedModelDidChange")
-}
-
-extension AppState {
-    func getSelectedModelFamily() -> String? {
-        if let savedModel = get(key: SELECTED_LLM_KEY),
-           let modelFamily = savedModel["modelFamily"]?.stringValue {
-            return modelFamily
-        }
-        return nil
-    }
-
-    func getSelectedModelName() -> String? {
-        if let savedModel = get(key: SELECTED_LLM_KEY),
-           let modelName = savedModel["modelName"]?.stringValue {
-            return modelName
-        }
-        return nil
-    }
-    
-    func isSelectedModelSupportVision() -> Bool? {
-        if let savedModel = get(key: SELECTED_LLM_KEY) {
-           return savedModel["supportVision"]?.boolValue
-        }
-        return nil
-    }
-
-    func setSelectedModel(_ model: LLMModel) {
-        update(key: SELECTED_LLM_KEY, value: model)
-        NotificationCenter.default.post(name: .gitHubCopilotSelectedModelDidChange, object: nil)
-    }
-
-    func modelScope() -> PromptTemplateScope {
-        return isAgentModeEnabled() ? .agentPanel : .chatPanel
-    }
-    
-    func getSelectedChatMode() -> String {
-        if let savedMode = get(key: SELECTED_CHATMODE_KEY),
-           let modeName = savedMode.stringValue {
-            return convertChatMode(modeName)
-        }
-        return "Ask"
-    }
-
-    func setSelectedChatMode(_ mode: String) {
-        update(key: SELECTED_CHATMODE_KEY, value: mode)
-    }
-
-    func isAgentModeEnabled() -> Bool {
-        return getSelectedChatMode() == "Agent"
-    }
-
-    private func convertChatMode(_ mode: String) -> String {
-        switch mode {
-        case "Agent":
-            return "Agent"
-        default:
-            return "Ask"
-        }
-    }
-}
-
-class CopilotModelManagerObservable: ObservableObject {
-    static let shared = CopilotModelManagerObservable()
-    
-    @Published var availableChatModels: [LLMModel] = []
-    @Published var availableAgentModels: [LLMModel] = []
-    @Published var defaultChatModel: LLMModel?
-    @Published var defaultAgentModel: LLMModel?
-    private var cancellables = Set<AnyCancellable>()
-    
-    private init() {
-        // Initial load
-        availableChatModels = CopilotModelManager.getAvailableChatLLMs(scope: .chatPanel)
-        availableAgentModels = CopilotModelManager.getAvailableChatLLMs(scope: .agentPanel)
-        defaultChatModel = CopilotModelManager.getDefaultChatModel(scope: .chatPanel)
-        defaultAgentModel = CopilotModelManager.getDefaultChatModel(scope: .agentPanel)
-        
-        
-        // Setup notification to update when models change
-        NotificationCenter.default.publisher(for: .gitHubCopilotModelsDidChange)
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
-                self?.availableChatModels = CopilotModelManager.getAvailableChatLLMs(scope: .chatPanel)
-                self?.availableAgentModels = CopilotModelManager.getAvailableChatLLMs(scope: .agentPanel)
-                self?.defaultChatModel = CopilotModelManager.getDefaultChatModel(scope: .chatPanel)
-                self?.defaultAgentModel = CopilotModelManager.getDefaultChatModel(scope: .agentPanel)
-            }
-            .store(in: &cancellables)
-        
-        NotificationCenter.default.publisher(for: .gitHubCopilotShouldSwitchFallbackModel)
-            .receive(on: DispatchQueue.main)
-            .sink { _ in
-                if let fallbackModel = CopilotModelManager.getFallbackLLM(
-                    scope: AppState.shared
-                        .isAgentModeEnabled() ? .agentPanel : .chatPanel
-                ) {
-                    AppState.shared.setSelectedModel(
-                        .init(
-                            modelName: fallbackModel.modelName,
-                            modelFamily: fallbackModel.id,
-                            billing: fallbackModel.billing,
-                            supportVision: fallbackModel.capabilities.supports.vision
-                        )
-                    )
-                }
-            }
-            .store(in: &cancellables)
-    }
-}
-
-extension CopilotModelManager {
-    static func getAvailableChatLLMs(scope: PromptTemplateScope = .chatPanel) -> [LLMModel] {
-        let LLMs = CopilotModelManager.getAvailableLLMs()
-        return LLMs.filter(
-            { $0.scopes.contains(scope) }
-        ).map {
-            return LLMModel(
-                modelName: $0.modelName,
-                modelFamily: $0.isChatFallback ? $0.id : $0.modelFamily,
-                billing: $0.billing,
-                supportVision: $0.capabilities.supports.vision
-            )
-        }
-    }
-
-    static func getDefaultChatModel(scope: PromptTemplateScope = .chatPanel) -> LLMModel? {
-        let LLMs = CopilotModelManager.getAvailableLLMs()
-        let LLMsInScope = LLMs.filter({ $0.scopes.contains(scope) })
-        let defaultModel = LLMsInScope.first(where: { $0.isChatDefault })
-        // If a default model is found, return it
-        if let defaultModel = defaultModel {
-            return LLMModel(
-                modelName: defaultModel.modelName,
-                modelFamily: defaultModel.modelFamily,
-                billing: defaultModel.billing,
-                supportVision: defaultModel.capabilities.supports.vision
-            )
-        }
-
-        // Fallback to gpt-4.1 if available
-        let gpt4_1 = LLMsInScope.first(where: { $0.modelFamily == "gpt-4.1" })
-        if let gpt4_1 = gpt4_1 {
-            return LLMModel(
-                modelName: gpt4_1.modelName,
-                modelFamily: gpt4_1.modelFamily,
-                billing: gpt4_1.billing,
-                supportVision: gpt4_1.capabilities.supports.vision
-            )
-        }
-
-        // If no default model is found, fallback to the first available model
-        if let firstModel = LLMsInScope.first {
-            return LLMModel(
-                modelName: firstModel.modelName,
-                modelFamily: firstModel.modelFamily,
-                billing: firstModel.billing,
-                supportVision: firstModel.capabilities.supports.vision
-            )
-        }
-
-        return nil
-    }
-}
-
-struct LLMModel: Codable, Hashable {
-    let modelName: String
-    let modelFamily: String
-    let billing: CopilotModelBilling?
-    let supportVision: Bool
-}
-
-struct ScopeCache {
-    var modelMultiplierCache: [String: String] = [:]
-    var cachedMaxWidth: CGFloat = 0
-    var lastModelsHash: Int = 0
-}
-
 struct ModelPicker: View {
-    @State private var selectedModel = ""
+    @State private var selectedModel: LLMModel?
     @State private var isHovered = false
     @State private var isPressed = false
     @ObservedObject private var modelManager = CopilotModelManagerObservable.shared
@@ -203,6 +21,16 @@ struct ModelPicker: View {
     // Separate caches for both scopes
     @State private var askScopeCache: ScopeCache = ScopeCache()
     @State private var agentScopeCache: ScopeCache = ScopeCache()
+    
+    @State var isMCPFFEnabled: Bool
+    @State var isBYOKFFEnabled: Bool
+    @State private var cancellables = Set<AnyCancellable>()
+    
+    @StateObject private var fontScaleManager = FontScaleManager.shared
+    
+    var fontScale: Double {
+        fontScaleManager.currentScale
+    }
 
     let minimumPadding: Int = 48
     let attributes: [NSAttributedString.Key: NSFont] = [.font: NSFont.systemFont(ofSize: NSFont.systemFontSize)]
@@ -216,13 +44,30 @@ struct ModelPicker: View {
     }
 
     init() {
-        let initialModel = AppState.shared.getSelectedModelName() ?? CopilotModelManager.getDefaultChatModel()?.modelName ?? ""
+        let initialModel = AppState.shared.getSelectedModel() ??
+            CopilotModelManager.getDefaultChatModel()
         self._selectedModel = State(initialValue: initialModel)
+        self.isMCPFFEnabled = FeatureFlagNotifierImpl.shared.featureFlags.mcp
+        self.isBYOKFFEnabled = FeatureFlagNotifierImpl.shared.featureFlags.byok
         updateAgentPicker()
     }
+    
+    private func subscribeToFeatureFlagsDidChangeEvent() {
+        FeatureFlagNotifierImpl.shared.featureFlagsDidChange.sink(receiveValue: { featureFlags in
+            isMCPFFEnabled = featureFlags.mcp
+            isBYOKFFEnabled = featureFlags.byok
+        })
+        .store(in: &cancellables)
+    }
 
-    var models: [LLMModel] {
-        AppState.shared.isAgentModeEnabled() ? modelManager.availableAgentModels : modelManager.availableChatModels
+    var copilotModels: [LLMModel] {
+        AppState.shared.isAgentModeEnabled() ?
+        modelManager.availableAgentModels : modelManager.availableChatModels
+    }
+    
+    var byokModels: [LLMModel] {
+        AppState.shared.isAgentModeEnabled() ?
+        modelManager.availableAgentBYOKModels : modelManager.availableChatBYOKModels
     }
 
     var defaultModel: LLMModel? {
@@ -251,7 +96,9 @@ struct ModelPicker: View {
     
     // Update cache for specific scope only if models changed
     func updateModelCacheIfNeeded(for scope: PromptTemplateScope) {
-        let currentModels = scope == .agentPanel ? modelManager.availableAgentModels : modelManager.availableChatModels
+        let currentModels = scope == .agentPanel ?
+        modelManager.availableAgentModels + modelManager.availableAgentBYOKModels :
+        modelManager.availableChatModels + modelManager.availableChatBYOKModels
         let modelsHash = currentModels.hashValue
         
         if scope == .agentPanel {
@@ -269,18 +116,24 @@ struct ModelPicker: View {
         var maxWidth: CGFloat = 0
 
         for model in models {
-            let multiplierText = formatMultiplierText(for: model.billing)
-            newCache[model.modelName] = multiplierText
+            var multiplierText = ""
+            if model.billing != nil {
+                multiplierText = formatMultiplierText(for: model.billing)
+            } else if let providerName = model.providerName, !providerName.isEmpty {
+                // For BYOK models, show the provider name
+                multiplierText = providerName
+            }
+            newCache[model.modelName.appending(model.providerName ?? "")] = multiplierText
             
-            let displayName = "✓ \(model.modelName)"
+            let displayName = "✓ \(model.displayName ?? model.modelName)"
             let displayNameWidth = displayName.size(withAttributes: attributes).width
             let multiplierWidth = multiplierText.isEmpty ? 0 : multiplierText.size(withAttributes: attributes).width
             let totalWidth = displayNameWidth + minimumPaddingWidth + multiplierWidth
             maxWidth = max(maxWidth, totalWidth)
         }
 
-        if maxWidth == 0 {
-            maxWidth = selectedModel.size(withAttributes: attributes).width
+        if maxWidth == 0, let selectedModel = selectedModel {
+            maxWidth = (selectedModel.displayName ?? selectedModel.modelName).size(withAttributes: attributes).width
         }
         
         return ScopeCache(
@@ -291,7 +144,32 @@ struct ModelPicker: View {
     }
 
     func updateCurrentModel() {
-        selectedModel = AppState.shared.getSelectedModelName() ?? defaultModel?.modelName ?? ""
+        let currentModel = AppState.shared.getSelectedModel()
+        var allAvailableModels = copilotModels
+        if isBYOKFFEnabled {
+            allAvailableModels += byokModels
+        }
+        
+        // Check if current model exists in available models for current scope using model comparison
+        let modelExists = allAvailableModels.contains { model in
+            model == currentModel
+        }
+        
+        if !modelExists && currentModel != nil {
+            // Switch to default model if current model is not available
+            if let fallbackModel = defaultModel {
+                AppState.shared.setSelectedModel(fallbackModel)
+                selectedModel = fallbackModel
+            } else if let firstAvailable = allAvailableModels.first {
+                // If no default model, use first available
+                AppState.shared.setSelectedModel(firstAvailable)
+                selectedModel = firstAvailable
+            } else {
+                selectedModel = nil
+            }
+        } else {
+            selectedModel = currentModel ?? defaultModel
+        }
     }
     
     func updateAgentPicker() {
@@ -299,10 +177,12 @@ struct ModelPicker: View {
     }
     
     func switchModelsForScope(_ scope: PromptTemplateScope) {
-        let newModeModels = CopilotModelManager.getAvailableChatLLMs(scope: scope)
+        let newModeModels = CopilotModelManager.getAvailableChatLLMs(
+            scope: scope
+        ) + BYOKModelManager.getAvailableChatLLMs(scope: scope)
         
-        if let currentModel = AppState.shared.getSelectedModelName() {
-            if !newModeModels.isEmpty && !newModeModels.contains(where: { $0.modelName == currentModel }) {
+        if let currentModel = AppState.shared.getSelectedModel() {
+            if !newModeModels.isEmpty && !newModeModels.contains(where: { $0 == currentModel }) {
                 let defaultModel = CopilotModelManager.getDefaultChatModel(scope: scope)
                 if let defaultModel = defaultModel {
                     AppState.shared.setSelectedModel(defaultModel)
@@ -318,10 +198,14 @@ struct ModelPicker: View {
     
     // Model picker menu component
     private var modelPickerMenu: some View {
-        Menu(selectedModel) {
+        Menu {
             // Group models by premium status
-            let premiumModels = models.filter { $0.billing?.isPremium == true }
-            let standardModels = models.filter { $0.billing?.isPremium == false || $0.billing == nil }
+            let premiumModels = copilotModels.filter {
+                $0.billing?.isPremium == true
+            }
+            let standardModels = copilotModels.filter {
+                $0.billing?.isPremium == false || $0.billing == nil
+            }
             
             // Display standard models section if available
             modelSection(title: "Standard Models", models: standardModels)
@@ -329,13 +213,26 @@ struct ModelPicker: View {
             // Display premium models section if available
             modelSection(title: "Premium Models", models: premiumModels)
             
+            if isBYOKFFEnabled {
+                // Display byok models section if available
+                modelSection(title: "Other Models", models: byokModels)
+
+                Button("Manage Models...") {
+                    try? launchHostAppBYOKSettings()
+                }
+            }
+            
             if standardModels.isEmpty {
                 Link("Add Premium Models", destination: URL(string: "https://aka.ms/github-copilot-upgrade-plan")!)
             }
+        } label: {
+            Text(selectedModel?.displayName ?? selectedModel?.modelName ?? "")
+                // scaledFont not work here. workaround by direclty use the fontScale
+                .font(.system(size: 13 * fontScale))
         }
         .menuStyle(BorderlessButtonMenuStyle())
         .frame(maxWidth: labelWidth())
-        .padding(4)
+        .scaledPadding(4)
         .background(
             RoundedRectangle(cornerRadius: 5)
                 .fill(isHovered ? Color.gray.opacity(0.1) : Color.clear)
@@ -363,28 +260,40 @@ struct ModelPicker: View {
             AppState.shared.setSelectedModel(model)
         } label: {
             Text(createModelMenuItemAttributedString(
-                modelName: model.modelName,
-                isSelected: selectedModel == model.modelName,
-                cachedMultiplierText: currentCache.modelMultiplierCache[model.modelName] ?? ""
+                modelName: model.displayName ?? model.modelName,
+                isSelected: selectedModel == model,
+                cachedMultiplierText: currentCache.modelMultiplierCache[model.modelName.appending(model.providerName ?? "")] ?? ""
             ))
         }
     }
     
     private var mcpButton: some View {
-        Button(action: {
-            try? launchHostAppMCPSettings()
-        }) {
-            Image(systemName: "wrench.and.screwdriver")
-                .resizable()
-                .scaledToFit()
-                .frame(width: 16, height: 16)
-                .padding(4)
-                .foregroundColor(.primary.opacity(0.85))
-                .font(Font.system(size: 11, weight: .semibold))
+        Group {
+            if isMCPFFEnabled {
+                Button(action: {
+                    try? launchHostAppToolsSettings()
+                }) {
+                    mcpIcon.foregroundColor(.primary.opacity(0.85))
+                }
+                .buttonStyle(HoverButtonStyle(padding: 0))
+                .help("Configure your MCP server")
+            } else {
+                // Non-interactive view that looks like a button but only shows tooltip
+                mcpIcon.foregroundColor(Color(nsColor: .tertiaryLabelColor))
+                    .padding(0)
+                    .help("MCP servers are disabled by org policy. Contact your admin.")
+            }
         }
-        .buttonStyle(HoverButtonStyle(padding: 0))
-        .help("Configure your MCP server")
         .cornerRadius(6)
+    }
+    
+    private var mcpIcon: some View {
+        Image(systemName: "wrench.and.screwdriver")
+            .resizable()
+            .scaledToFit()
+            .scaledFrame(width: 16, height: 16)
+            .padding(4)
+            .font(Font.system(size: 11, weight: .semibold))
     }
     
     // Main view body
@@ -403,7 +312,7 @@ struct ModelPicker: View {
 
                 // Model Picker
                 Group {
-                    if !models.isEmpty && !selectedModel.isEmpty {
+                    if !copilotModels.isEmpty && selectedModel != nil {
                         modelPickerMenu
                     } else {
                         EmptyView()
@@ -430,18 +339,36 @@ struct ModelPicker: View {
                 updateCurrentModel()
                 updateModelCacheIfNeeded(for: .agentPanel)
             }
+            .onChange(of: modelManager.availableChatBYOKModels) { _ in
+                updateCurrentModel()
+                updateModelCacheIfNeeded(for: .chatPanel)
+            }
+            .onChange(of: modelManager.availableAgentBYOKModels) { _ in
+                updateCurrentModel()
+                updateModelCacheIfNeeded(for: .agentPanel)
+            }
             .onChange(of: chatMode) { _ in
+                updateCurrentModel()
+            }
+            .onChange(of: isBYOKFFEnabled) { _ in
                 updateCurrentModel()
             }
             .onReceive(NotificationCenter.default.publisher(for: .gitHubCopilotSelectedModelDidChange)) { _ in
                 updateCurrentModel()
             }
+            .task {
+                subscribeToFeatureFlagsDidChangeEvent()
+            }
         }
     }
 
     func labelWidth() -> CGFloat {
-        let width = selectedModel.size(withAttributes: attributes).width
-        return CGFloat(width + 20)
+        guard let selectedModel = selectedModel else { return 100 }
+        let displayName = selectedModel.displayName ?? selectedModel.modelName
+        let width = displayName.size(
+            withAttributes: attributes
+        ).width
+        return CGFloat(width * fontScale + 20)
     }
 
     @MainActor
@@ -480,7 +407,10 @@ struct ModelPicker: View {
             
             attributedString = AttributedString(fullString)
 
-            if let range = attributedString.range(of: cachedMultiplierText) {
+            if let range = attributedString.range(
+                of: cachedMultiplierText,
+                options: .backwards
+            ) {
                 attributedString[range].foregroundColor = .secondary
             }
         }

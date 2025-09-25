@@ -25,13 +25,14 @@ struct HoverRadiusBackgroundModifier: ViewModifier {
                 RoundedRectangle(cornerRadius: cornerRadius)
                     .fill(isHovered ? hoverColor ?? ITEM_SELECTED_COLOR : Color.clear)
             )
+            .clipShape(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            )
             .overlay(
-                Group {
-                    if isHovered && showBorder {
-                        RoundedRectangle(cornerRadius: cornerRadius)
-                            .stroke(borderColor, lineWidth: borderWidth)
-                    }
-                }
+                (isHovered && showBorder) ? 
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .strokeBorder(borderColor, lineWidth: borderWidth) : 
+                nil
             )
     }
 }
@@ -58,8 +59,16 @@ extension View {
         self.modifier(HoverRadiusBackgroundModifier(isHovered: isHovered, hoverColor: hoverColor, cornerRadius: cornerRadius))
     }
     
-    public func hoverRadiusBackground(isHovered: Bool, hoverColor: Color?, cornerRadius: CGFloat, showBorder: Bool) -> some View {
-        self.modifier(HoverRadiusBackgroundModifier(isHovered: isHovered, hoverColor: hoverColor, cornerRadius: cornerRadius, showBorder: showBorder))
+    public func hoverRadiusBackground(isHovered: Bool, hoverColor: Color?, cornerRadius: CGFloat, showBorder: Bool, borderColor: Color = .white.opacity(0.07)) -> some View {
+        self.modifier(
+            HoverRadiusBackgroundModifier(
+                isHovered: isHovered,
+                hoverColor: hoverColor,
+                cornerRadius: cornerRadius,
+                showBorder: true,
+                borderColor: borderColor
+            )
+        )
     }
 
     public func hoverForeground(isHovered: Bool, defaultColor: Color) -> some View {

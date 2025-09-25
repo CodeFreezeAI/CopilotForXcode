@@ -6,11 +6,14 @@ import LanguageServerProtocol
 public final class BatchingFileChangeWatcher: DirectoryWatcherProtocol {
     private var watchedPaths: [URL]
     private let changePublisher: PublisherType
+    private let directoryChangePublisher: PublisherType?
     private let publishInterval: TimeInterval
     
     private var pendingEvents: [FileEvent] = []
+    private var pendingDirectoryEvents: [FileEvent] = []
     private var timer: Timer?
     private let eventQueue: DispatchQueue
+    private let directoryEventQueue: DispatchQueue
     private let fsEventQueue: DispatchQueue
     private var eventStream: FSEventStreamRef?
     private(set) public var isWatching = false
@@ -25,14 +28,17 @@ public final class BatchingFileChangeWatcher: DirectoryWatcherProtocol {
         watchedPaths: [URL],
         changePublisher: @escaping PublisherType,
         publishInterval: TimeInterval = 3.0,
-        fsEventProvider: FSEventProvider = FileChangeWatcherFSEventProvider()
+        fsEventProvider: FSEventProvider = FileChangeWatcherFSEventProvider(),
+        directoryChangePublisher: PublisherType? = nil
     ) {
         self.watchedPaths = watchedPaths
         self.changePublisher = changePublisher
         self.publishInterval = publishInterval
         self.fsEventProvider = fsEventProvider
-        self.eventQueue = DispatchQueue(label: "com.github.copilot.filechangewatcher")
+        self.eventQueue = DispatchQueue(label: "com.github.copilot.filechangewatcher.file")
+        self.directoryEventQueue = DispatchQueue(label: "com.github.copilot.filechangewatcher.directory")
         self.fsEventQueue = DispatchQueue(label: "com.github.copilot.filechangewatcherfseventstream", qos: .utility)
+        self.directoryChangePublisher = directoryChangePublisher
         
         self.start()
     }
@@ -86,6 +92,7 @@ public final class BatchingFileChangeWatcher: DirectoryWatcherProtocol {
             guard let self else { return }
             self.timer = Timer.scheduledTimer(withTimeInterval: self.publishInterval, repeats: true) { [weak self] _ in
                 self?.publishChanges()
+                self?.publishDirectoryChanges()
             }
         }
     }
@@ -96,43 +103,38 @@ public final class BatchingFileChangeWatcher: DirectoryWatcherProtocol {
         }
     }
     
-    public func onFileCreated(file: URL) {
-        addEvent(file: file, type: .created)
+    internal func addDirectoryEvent(directory: URL, type: FileChangeType) {
+        guard self.directoryChangePublisher != nil else {
+            return
+        }
+        directoryEventQueue.async {
+            self.pendingDirectoryEvents.append(FileEvent(uri: directory.absoluteString, type: type))
+        }
     }
     
-    public func onFileChanged(file: URL) {
-        addEvent(file: file, type: .changed)
-    }
-    
-    public func onFileDeleted(file: URL) {
-        addEvent(file: file, type: .deleted)
+    /// When `.deleted`, the `isDirectory` will be `nil`
+    public func onFsEvent(url: URL, type: FileChangeType, isDirectory: Bool?) {
+        // Could be file or directory
+        if type == .deleted, isDirectory == nil {
+            addEvent(file: url, type: type)
+            addDirectoryEvent(directory: url, type: type)
+            return
+        }
+        
+        guard let isDirectory else { return }
+        
+        if isDirectory {
+            addDirectoryEvent(directory: url, type: type)
+        } else {
+            addEvent(file: url, type: type)
+        }
     }
     
     private func publishChanges() {
         eventQueue.async {
             guard !self.pendingEvents.isEmpty else { return }
             
-            var compressedEvent: [String: FileEvent] = [:]
-            for event in self.pendingEvents {
-                let existingEvent = compressedEvent[event.uri]
-                
-                guard existingEvent != nil else {
-                    compressedEvent[event.uri] = event
-                    continue
-                }
-                
-                if event.type == .deleted { /// file deleted. Cover created and changed event
-                    compressedEvent[event.uri] = event
-                } else if event.type == .created { /// file created. Cover deleted and changed event
-                    compressedEvent[event.uri] = event
-                } else if event.type == .changed {
-                    if existingEvent?.type != .created { /// file changed. Won't cover created event
-                        compressedEvent[event.uri] = event
-                    }
-                }
-            }
-            
-            let compressedEventArray: [FileEvent] = Array(compressedEvent.values)
+            let compressedEventArray = self.compressEvents(self.pendingEvents)
             
             let changes = Array(compressedEventArray.prefix(BatchingFileChangeWatcher.maxEventPublishSize))
             if compressedEventArray.count > BatchingFileChangeWatcher.maxEventPublishSize {
@@ -147,6 +149,59 @@ public final class BatchingFileChangeWatcher: DirectoryWatcherProtocol {
                 }
             }
         }
+    }
+    
+    private func publishDirectoryChanges() {
+        guard let directoryChangePublisher = self.directoryChangePublisher else {
+            return
+        }
+        directoryEventQueue.async {
+            guard !self.pendingDirectoryEvents.isEmpty else { 
+                return 
+            }
+            
+            let compressedEventArray = self.compressEvents(self.pendingDirectoryEvents)
+            let changes = Array(compressedEventArray.prefix(Self.maxEventPublishSize))
+            if compressedEventArray.count > Self.maxEventPublishSize {
+                self.pendingDirectoryEvents = Array(
+                    compressedEventArray[Self.maxEventPublishSize..<compressedEventArray.count]
+                )
+            } else {
+                self.pendingDirectoryEvents.removeAll()
+            }
+            
+            if !changes.isEmpty {
+                DispatchQueue.main.async {
+                    directoryChangePublisher(changes)
+                }
+            }
+        }
+    }
+    
+    private func compressEvents(_ events: [FileEvent]) -> [FileEvent] {
+        var compressedEvent: [String: FileEvent] = [:]
+        for event in events {
+            let existingEvent = compressedEvent[event.uri]
+            
+            guard existingEvent != nil else {
+                compressedEvent[event.uri] = event
+                continue
+            }
+            
+            if event.type == .deleted { /// file deleted. Cover created and changed event
+                compressedEvent[event.uri] = event
+            } else if event.type == .created { /// file created. Cover deleted and changed event
+                compressedEvent[event.uri] = event
+            } else if event.type == .changed {
+                if existingEvent?.type != .created { /// file changed. Won't cover created event
+                    compressedEvent[event.uri] = event
+                }
+            }
+        }
+        
+        let compressedEventArray: [FileEvent] = Array(compressedEvent.values)
+        
+        return compressedEventArray
     }
     
     /// Starts watching  for file changes in the project
@@ -209,47 +264,57 @@ public final class BatchingFileChangeWatcher: DirectoryWatcherProtocol {
             
             let url = URL(fileURLWithPath: path)
             
-            guard !shouldIgnoreURL(url: url) else { continue }
+            // Keep this duplicated checking. Will block in advance for corresponding cases 
+            guard !WorkspaceFile.shouldSkipURL(url) else {
+                continue
+            }
             
             let fileExists = FileManager.default.fileExists(atPath: path)
+            var isDirectory: Bool?
+            if fileExists {
+                guard let resourceValues = try? url.resourceValues(forKeys: [.isRegularFileKey, .isDirectoryKey]),
+                      (resourceValues.isDirectory == true || resourceValues.isRegularFile == true)
+                else {
+                    continue
+                }
+                isDirectory = resourceValues.isDirectory == true
+                if isDirectory == false, let isValid = try? WorkspaceFile.isValidFile(url), !isValid {
+                    continue
+                } else if isDirectory == true, !WorkspaceDirectory.isValidDirectory(url) {
+                    continue
+                }
+            }
             
             /// FileSystem events can have multiple flags set simultaneously,
             
             if flags & UInt32(kFSEventStreamEventFlagItemCreated) != 0 {
-                if fileExists { onFileCreated(file: url) }
+                if fileExists { 
+                    onFsEvent(url: url, type: .created, isDirectory: isDirectory) 
+                }
             }
             
             if flags & UInt32(kFSEventStreamEventFlagItemRemoved) != 0 {
-                onFileDeleted(file: url)
+                onFsEvent(url: url, type: .deleted, isDirectory: isDirectory)
             }
             
             /// The fiesystem report "Renamed" event when file content changed.
             if flags & UInt32(kFSEventStreamEventFlagItemRenamed) != 0 {
-                if fileExists { onFileChanged(file: url) }
-                else { onFileDeleted(file: url) }
+                if fileExists { 
+                    onFsEvent(url: url, type: .changed, isDirectory: isDirectory)
+                }
+                else { 
+                    onFsEvent(url: url, type: .deleted, isDirectory: isDirectory)
+                }
             }
             
             if flags & UInt32(kFSEventStreamEventFlagItemModified) != 0 {
-                if fileExists { onFileChanged(file: url) }
-                else { onFileDeleted(file: url)}
+                if fileExists { 
+                    onFsEvent(url: url, type: .changed, isDirectory: isDirectory)
+                }
+                else { 
+                    onFsEvent(url: url, type: .deleted, isDirectory: isDirectory)
+                }
             }
         }
-    }
-}
-
-extension BatchingFileChangeWatcher {
-    internal func shouldIgnoreURL(url: URL) -> Bool {
-        if let resourceValues = try? url.resourceValues(forKeys: [.isRegularFileKey, .isDirectoryKey]),
-           resourceValues.isDirectory == true { return true }
-        
-        if supportedFileExtensions.contains(url.pathExtension.lowercased()) == false { return true }
-        
-        if WorkspaceFile.isXCProject(url) || WorkspaceFile.isXCWorkspace(url) { return true }
-        
-        if WorkspaceFile.matchesPatterns(url, patterns: skipPatterns) { return true }
-        
-        // TODO: check if url is ignored by git / ide
-        
-        return false
     }
 }

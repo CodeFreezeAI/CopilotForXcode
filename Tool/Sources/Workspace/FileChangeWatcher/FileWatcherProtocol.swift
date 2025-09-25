@@ -26,6 +26,7 @@ public protocol FileWatcherFactory {
     func createDirectoryWatcher(
         watchedPaths: [URL],
         changePublisher: @escaping PublisherType,
-        publishInterval: TimeInterval
+        publishInterval: TimeInterval,
+        directoryChangePublisher: PublisherType?
     ) -> DirectoryWatcherProtocol
 }

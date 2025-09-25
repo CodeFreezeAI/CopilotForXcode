@@ -60,14 +60,14 @@ GitHub Copilot for Xcode requires background permission to connect with the host
 
 
 <p align="center">
-     <img alt="Background Permission" src="./Docs/background-item.png" width="400" />
+     <img alt="Background Permission" src="./Docs/Images/background-item.png" width="400" />
 </p>
 
 This permission is typically granted automatically when you first launch GitHub Copilot for Xcode. However, if you encounter connection issues, alerts, or errors as follows:
 
 <p align="center">
-     <img alt="Alert of Background Permission Required" src="./Docs/background-permission-required.png" width="350" />
-     <img alt="Error connecting to the communication bridge" src="./Docs/connect-comm-bridge-failed.png" width="550" />
+     <img alt="Alert of Background Permission Required" src="./Docs/Images/background-permission-required.png" width="350" />
+     <img alt="Error connecting to the communication bridge" src="./Docs/Images/connect-comm-bridge-failed.png" width="550" />
 </p>
 
 Please ensure that this permission is enabled. You can manually navigate to the background permission setting based on your macOS version:

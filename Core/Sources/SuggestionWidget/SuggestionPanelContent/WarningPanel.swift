@@ -27,7 +27,7 @@ struct WarningPanel: View {
                             .renderingMode(.template)
                             .scaledToFit()
                             .foregroundColor(.primary)
-                            .frame(width: 14, height: 14)
+                            .scaledFrame(width: 14, height: 14)
                         
                         Text("Monthly completion limit reached.")
                             .font(.system(size: 12))

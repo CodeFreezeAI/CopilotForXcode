@@ -11,7 +11,9 @@ struct SettingsToggle: View {
             Text(title)
             Spacer()
             Toggle(isOn: isOn) {}
+                .controlSize(.mini)
                 .toggleStyle(.switch)
+                .padding(.vertical, 4)
         }
         .padding(SettingsToggle.defaultPadding)
     }

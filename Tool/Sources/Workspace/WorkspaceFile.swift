@@ -13,7 +13,9 @@ public let skipPatterns: [String] = [
     ".DS_Store",
     "Thumbs.db",
     "node_modules",
-    "bower_components"
+    "bower_components",
+    "Preview Content",
+    ".swiftpm"
 ]
 
 public struct ProjectInfo {
@@ -190,7 +192,8 @@ public struct WorkspaceFile {
         return name
     }
     
-    private static func shouldSkipFile(_ url: URL) -> Bool {
+    // Commom URL skip checking
+    public static func shouldSkipURL(_ url: URL) -> Bool {
         return matchesPatterns(url, patterns: skipPatterns)
         || isXCWorkspace(url)
         || isXCProject(url)
@@ -202,7 +205,7 @@ public struct WorkspaceFile {
         _ url: URL,
         shouldExcludeFile: ((URL) -> Bool)? = nil
     ) throws -> Bool {
-        if shouldSkipFile(url) { return false }
+        if shouldSkipURL(url) { return false }
         
         let resourceValues = try url.resourceValues(forKeys: [.isRegularFileKey, .isDirectoryKey])
         
@@ -225,8 +228,8 @@ public struct WorkspaceFile {
         workspaceURL: URL,
         workspaceRootURL: URL,
         shouldExcludeFile: ((URL) -> Bool)? = nil
-    ) -> [FileReference] {
-        var files: [FileReference] = []
+    ) -> [ConversationFileReference] {
+        var files: [ConversationFileReference] = []
         do {
             let fileManager = FileManager.default
             var subprojects: [URL] = []
@@ -248,7 +251,7 @@ public struct WorkspaceFile {
 
                 while let fileURL = enumerator?.nextObject() as? URL {
                     // Skip items matching the specified pattern
-                    if shouldSkipFile(fileURL) {
+                    if shouldSkipURL(fileURL) {
                         enumerator?.skipDescendants()
                         continue
                     }
@@ -258,7 +261,7 @@ public struct WorkspaceFile {
                     let relativePath = fileURL.path.replacingOccurrences(of: workspaceRootURL.path, with: "")
                     let fileName = fileURL.lastPathComponent
 
-                    let file = FileReference(url: fileURL, relativePath: relativePath, fileName: fileName)
+                    let file = ConversationFileReference(url: fileURL, relativePath: relativePath, fileName: fileName)
                     files.append(file)
                 }
             }
@@ -277,7 +280,7 @@ public struct WorkspaceFile {
         projectURL: URL,
         excludeGitIgnoredFiles: Bool,
         excludeIDEIgnoredFiles: Bool
-    ) -> [FileReference] {
+    ) -> [ConversationFileReference] {
         // Directly return for invalid workspace
         guard workspaceURL.path != "/" else { return [] }
         

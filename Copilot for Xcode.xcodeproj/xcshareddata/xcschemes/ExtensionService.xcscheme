@@ -50,6 +50,18 @@
             reference = "container:Pro/ProTestPlan.xctestplan">
          </TestPlanReference>
       </TestPlans>
+      <Testables>
+         <TestableReference
+            skipped = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "GitHelperTests"
+               BuildableName = "GitHelperTests"
+               BlueprintName = "GitHelperTests"
+               ReferencedContainer = "container:Tool">
+            </BuildableReference>
+         </TestableReference>
+      </Testables>
    </TestAction>
    <LaunchAction
       buildConfiguration = "Debug"

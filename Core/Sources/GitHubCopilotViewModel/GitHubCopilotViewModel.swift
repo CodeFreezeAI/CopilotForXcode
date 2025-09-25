@@ -17,7 +17,6 @@ public class GitHubCopilotViewModel: ObservableObject {
     public static let shared = GitHubCopilotViewModel()
     
     @Dependency(\.toast) var toast
-    @Dependency(\.openURL) var openURL
     
     @AppStorage("username") var username: String = ""
     
@@ -137,10 +136,8 @@ public class GitHubCopilotViewModel: ObservableObject {
         pasteboard.declareTypes([NSPasteboard.PasteboardType.string], owner: nil)
         pasteboard.setString(signInResponse.userCode, forType: NSPasteboard.PasteboardType.string)
         toast("Sign-in code \(signInResponse.userCode) copied", .info)
-        Task {
-            await openURL(signInResponse.verificationURL)
-            waitForSignIn()
-        }
+        NSWorkspace.shared.open(signInResponse.verificationURL)
+        waitForSignIn()
     }
     
     public func waitForSignIn() {
@@ -243,9 +240,7 @@ public class GitHubCopilotViewModel: ObservableObject {
         alert.addButton(withTitle: "Copy Commands")
         alert.addButton(withTitle: "Cancel")
         
-        let response = await MainActor.run {
-            alert.runModal()
-        }
+        let response = alert.runModal()
         
         if response == .alertFirstButtonReturn {
             copyCommandsToClipboard()

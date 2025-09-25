@@ -17,15 +17,15 @@ struct ChatLoginView: View {
                             .resizable()
                             .renderingMode(.template)
                             .scaledToFill()
-                            .frame(width: 60.0, height: 60.0)
+                            .scaledFrame(width: 60.0, height: 60.0)
                             .foregroundColor(.secondary)
                         
                         Text("Welcome to Copilot")
-                            .font(.largeTitle)
+                            .scaledFont(.largeTitle)
                             .multilineTextAlignment(.center)
                         
                         Text("Your AI-powered coding assistant")
-                            .font(.body)
+                            .scaledFont(.body)
                             .multilineTextAlignment(.center)
                     }
                     
@@ -37,11 +37,15 @@ struct ChatLoginView: View {
                                 openURL(url)
                             }
                         }
+                        .scaledFont(.body)
                         .buttonStyle(.borderedProminent)
                         
                         HStack{
                             Text("Already have an account?")
+                                .scaledFont(.body)
+                            
                             Button("Sign In") { viewModel.signIn() }
+                                .scaledFont(.body)
                                 .buttonStyle(.borderless)
                                 .foregroundColor(Color("TextLinkForegroundColor"))
                             
@@ -55,7 +59,7 @@ struct ChatLoginView: View {
                     
                     Spacer()
                     Text("Copilot Free and Copilot Pro may show [public code](https://aka.ms/github-copilot-match-public-code) suggestions and collect telemetry. You can change these [GitHub settings](https://aka.ms/github-copilot-settings) at any time. By continuing, you agree to our [terms](https://github.com/customer-terms/github-copilot-product-specific-terms) and [privacy policy](https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement).")
-                        .font(.system(size: 12))
+                        .scaledFont(.system(size: 12))
                 }
                 .padding()
                 .frame(
@@ -71,7 +75,10 @@ struct ChatLoginView: View {
                 presenting: viewModel.signInResponse
             ) { _ in
                 Button("Cancel", role: .cancel, action: {})
+                    .scaledFont(.body)
+                
                 Button("Copy Code and Open", action: viewModel.copyAndOpen)
+                    .scaledFont(.body)
             } message: { response in
                 Text("""
                     Please enter the above code in the GitHub website \

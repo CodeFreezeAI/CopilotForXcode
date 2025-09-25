@@ -7,12 +7,28 @@ import SystemUtils
 
 public struct ContextUtils {
 
-    public static func getFilesFromWorkspaceIndex(workspaceURL: URL?) -> [FileReference]? {
-        guard let workspaceURL = workspaceURL else { return [] }
-        return WorkspaceFileIndex.shared.getFiles(for: workspaceURL)
+    public static func getFilesFromWorkspaceIndex(workspaceURL: URL?) -> [ConversationAttachedReference]? {
+        guard let workspaceURL = workspaceURL else { return nil }
+        
+        var references: [ConversationAttachedReference]?
+        
+        if let directories = WorkspaceDirectoryIndex.shared.getDirectories(for: workspaceURL) {
+            references = directories
+                .sorted { $0.url.lastPathComponent < $1.url.lastPathComponent }
+                .map { .directory($0) }
+        }
+        
+        if let files = WorkspaceFileIndex.shared.getFiles(for: workspaceURL) {
+            references = (references ?? []) + files
+                .sorted { $0.url.lastPathComponent < $1.url.lastPathComponent }
+                .map { .file($0) }
+        }
+        
+        
+        return references
     }
 
-    public static func getFilesInActiveWorkspace(workspaceURL: URL?) -> [FileReference] {
+    public static func getFilesInActiveWorkspace(workspaceURL: URL?) -> [ConversationFileReference] {
         if let workspaceURL = workspaceURL, let info = WorkspaceFile.getWorkspaceInfo(workspaceURL: workspaceURL) {
             return WorkspaceFile.getFilesInActiveWorkspace(workspaceURL: info.workspaceURL, workspaceRootURL: info.projectURL)
         }

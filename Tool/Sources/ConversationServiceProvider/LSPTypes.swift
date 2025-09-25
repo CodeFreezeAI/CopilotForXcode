@@ -63,6 +63,11 @@ public struct CopilotModelCapabilitiesSupports: Codable, Equatable {
 public struct CopilotModelBilling: Codable, Equatable, Hashable {
     public let isPremium: Bool
     public let multiplier: Float
+    
+    public init(isPremium: Bool, multiplier: Float) {
+        self.isPremium = isPremium
+        self.multiplier = multiplier
+    }
 }
 
 // MARK: Conversation Agents
@@ -88,6 +93,29 @@ public struct RegisterToolsParams: Codable, Equatable {
     public init(tools: [LanguageModelToolInformation]) {
         self.tools = tools
     }
+}
+
+public struct UpdateToolsStatusParams: Codable, Equatable {
+    public let tools: [ToolStatusUpdate]
+
+    public init(tools: [ToolStatusUpdate]) {
+        self.tools = tools
+    }
+}
+
+public struct ToolStatusUpdate: Codable, Equatable {
+    public let name: String
+    public let status: ToolStatus
+    
+    public init(name: String, status: ToolStatus) {
+        self.name = name
+        self.status = status
+    }
+}
+
+public enum ToolStatus: String, Codable, Equatable, Hashable {
+    case enabled = "enabled"
+    case disabled = "disabled"
 }
 
 public struct LanguageModelToolInformation: Codable, Equatable {
@@ -151,6 +179,68 @@ public struct LanguageModelToolConfirmationMessages: Codable, Equatable {
         self.title = title
         self.message = message
     }
+}
+
+public struct LanguageModelTool: Codable, Equatable {
+    public let id: String
+    public let type: ToolType
+    public let toolProvider: ToolProvider
+    public let nameForModel: String
+    public let name: String
+    public let displayName: String?
+    public let description: String?
+    public let displayDescription: String
+    public let inputSchema: [String: AnyCodable]?
+    public let annotations: ToolAnnotations?
+    public let status: ToolStatus
+    
+    public init(
+        id: String,
+        type: ToolType,
+        toolProvider: ToolProvider,
+        nameForModel: String,
+        name: String,
+        displayName: String?,
+        description: String?,
+        displayDescription: String,
+        inputSchema: [String : AnyCodable]?,
+        annotations: ToolAnnotations?,
+        status: ToolStatus
+    ) {
+        self.id = id
+        self.type = type
+        self.toolProvider = toolProvider
+        self.nameForModel = nameForModel
+        self.name = name
+        self.displayName = displayName
+        self.description = description
+        self.displayDescription = displayDescription
+        self.inputSchema = inputSchema
+        self.annotations = annotations
+        self.status = status
+    }
+}
+
+public enum ToolType: String, Codable, CaseIterable {
+    case shared = "shared"
+    case client = "client"
+    case mcp = "mcp"
+}
+
+public struct ToolProvider: Codable, Equatable {
+    public let id: String
+    public let displayName: String
+    public let displayNamePrefix: String?
+    public let description: String
+    public let isFirstPartyTool: Bool
+}
+
+public struct ToolAnnotations: Codable, Equatable {
+    public let title: String?
+    public let readOnlyHint: Bool?
+    public let destructiveHint: Bool?
+    public let idempotentHint: Bool?
+    public let openWorldHint: Bool?
 }
 
 public struct InvokeClientToolParams: Codable, Equatable {
@@ -247,6 +337,12 @@ public struct AnyCodable: Codable, Equatable {
 
 public typealias InvokeClientToolRequest = JSONRPCRequest<InvokeClientToolParams>
 
+public enum ToolInvocationStatus: String, Codable {
+    case success
+    case error
+    case cancelled
+}
+
 public struct LanguageModelToolResult: Codable, Equatable {
     public struct Content: Codable, Equatable {
         public let value: AnyCodable
@@ -256,9 +352,11 @@ public struct LanguageModelToolResult: Codable, Equatable {
         }
     }
     
+    public let status: ToolInvocationStatus
     public let content: [Content]
     
-    public init(content: [Content]) {
+    public init(status: ToolInvocationStatus = .success, content: [Content]) {
+        self.status = status
         self.content = content
     }
 }
@@ -333,4 +431,67 @@ public struct CopilotMessageActionItem: Codable, Equatable, Hashable {
 public struct ActionCommand: Codable, Equatable, Hashable {
     public var commandId: String
     public var args: LSPAny?
+}
+
+// MARK: - Copilot Code Review
+
+public struct ReviewChangesParams: Codable, Equatable {
+    public struct Change: Codable, Equatable {
+        public let uri: DocumentUri
+        public let path: String
+        // The original content of the file before changes were made. Will be empty string if the file is new.
+        public let baseContent: String
+        // The current content of the file with changes applied. Will be empty string if the file is deleted.
+        public let headContent: String
+        
+        public init(uri: DocumentUri, path: String, baseContent: String, headContent: String) {
+            self.uri = uri
+            self.path = path
+            self.baseContent = baseContent
+            self.headContent = headContent
+        }
+    }
+    
+    public let changes: [Change]
+    
+    public init(changes: [Change]) {
+        self.changes = changes
+    }
+}
+
+public struct ReviewComment: Codable, Equatable, Hashable {
+    // Self-defined `id` for using in comment operation. Add an init value to bypass decoding
+    public let id: String = UUID().uuidString
+    public let uri: DocumentUri
+    public let range: LSPRange
+    public let message: String
+    // enum: bug, performance, consistency, documentation, naming, readability, style, other
+    public let kind: String
+    // enum: low, medium, high
+    public let severity: String
+    public let suggestion: String?
+    
+    public init(
+        uri: DocumentUri,
+        range: LSPRange,
+        message: String,
+        kind: String,
+        severity: String,
+        suggestion: String?
+    ) {
+        self.uri = uri
+        self.range = range
+        self.message = message
+        self.kind = kind
+        self.severity = severity
+        self.suggestion = suggestion
+    }
+}
+
+public struct CodeReviewResult: Codable, Equatable {
+    public let comments: [ReviewComment]
+    
+    public init(comments: [ReviewComment]) {
+        self.comments = comments
+    }
 }

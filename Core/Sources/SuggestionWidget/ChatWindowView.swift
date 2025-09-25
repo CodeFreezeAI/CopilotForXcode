@@ -59,7 +59,7 @@ struct ChatView: View {
     
     var body: some View {
         VStack(spacing: 0) {
-            Rectangle().fill(.regularMaterial).frame(height: 28)
+            Rectangle().fill(Material.bar).frame(height: 28)
 
             Divider()
 
@@ -67,7 +67,7 @@ struct ChatView: View {
                 VStack(spacing: 0) {
                     ChatBar(store: store, isChatHistoryVisible: $isChatHistoryVisible)
                         .frame(height: 32)
-                        .background(Color(nsColor: .windowBackgroundColor))
+                        .background(.ultraThinMaterial)
 
                     Divider()
 
@@ -89,7 +89,7 @@ struct ChatHistoryViewWrapper: View {
     var body: some View {
         WithPerceptionTracking {
             VStack(spacing: 0) {
-                Rectangle().fill(.regularMaterial).frame(height: 28)
+                Rectangle().fill(Material.bar).frame(height: 28)
 
                 Divider()
                 
@@ -97,7 +97,7 @@ struct ChatHistoryViewWrapper: View {
                     store: store,
                     isChatHistoryVisible: $isChatHistoryVisible
                 )
-                .background(Color(nsColor: .windowBackgroundColor))
+                .background(.ultraThinMaterial)
                 .frame(
                     maxWidth: .infinity,
                     maxHeight: .infinity
@@ -136,7 +136,7 @@ struct ChatLoadingView: View {
         .xcodeStyleFrame(cornerRadius: 10)
         .ignoresSafeArea(edges: .top)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(.ultraThinMaterial)
     }
 }
 
@@ -163,7 +163,7 @@ struct ChatTitleBar: View {
                 ) {
                     Image(systemName: "minus")
                         .foregroundStyle(.black.opacity(0.5))
-                        .font(Font.system(size: 8).weight(.heavy))
+                        .scaledFont(Font.system(size: 8).weight(.heavy))
                 }
                 .opacity(0)
                 .keyboardShortcut("m", modifiers: [.command])
@@ -181,7 +181,7 @@ struct ChatTitleBar: View {
                     ) {
                         Image(systemName: "pin.fill")
                             .foregroundStyle(.black.opacity(0.5))
-                            .font(Font.system(size: 6).weight(.black))
+                            .scaledFont(Font.system(size: 6).weight(.black))
                             .transformEffect(.init(translationX: 0, y: 0.5))
                     }
                 }
@@ -213,7 +213,7 @@ struct ChatTitleBar: View {
                             ? color
                             : Color(nsColor: .separatorColor)
                     )
-                    .frame(
+                    .scaledFrame(
                         width: Style.trafficLightButtonSize,
                         height: Style.trafficLightButtonSize
                     )
@@ -322,10 +322,10 @@ struct ChatBar: View {
                             .resizable()
                             .renderingMode(.original)
                             .scaledToFit()
-                            .frame(width: 24, height: 24)
+                            .scaledFrame(width: 24, height: 24)
 
                     Text(store.chatHistory.selectedWorkspaceName!)
-                        .font(.system(size: 13, weight: .bold))
+                        .scaledFont(size: 13, weight: .bold)
                         .padding(.leading, 4)
                         .truncationMode(.tail)
                         .frame(maxWidth: 192, alignment: .leading)
@@ -344,6 +344,7 @@ struct ChatBar: View {
                     store.send(.createNewTapButtonClicked(kind: nil))
                 }) {
                     Image(systemName: "plus.bubble")
+                        .scaledFont(.body)
                 }
                 .buttonStyle(HoverButtonStyle())
                 .padding(.horizontal, 4)
@@ -364,8 +365,10 @@ struct ChatBar: View {
                 }) {
                     if #available(macOS 15.0, *) {
                         Image(systemName: "clock.arrow.trianglehead.counterclockwise.rotate.90")
+                            .scaledFont(.body)
                     } else {
                         Image(systemName: "clock.arrow.circlepath")
+                            .scaledFont(.body)
                     }
                 }
                 .buttonStyle(HoverButtonStyle())
@@ -385,6 +388,7 @@ struct ChatBar: View {
                     store.send(.openSettings)
                 }) {
                     Image(systemName: "gearshape")
+                        .scaledFont(.body)
                 }
                 .buttonStyle(HoverButtonStyle())
                 .padding(.horizontal, 4)
@@ -453,21 +457,17 @@ struct ChatTabContainer: View {
         tabInfoArray: IdentifiedArray<String, ChatTabInfo>,
         selectedTabId: String
     ) -> some View {
-        ZStack {
-            ForEach(tabInfoArray) { tabInfo in
-                if let tab = chatTabPool.getTab(of: tabInfo.id) {
-                    let isActive = tab.id == selectedTabId
-                    tab.body
-                        .opacity(isActive ? 1 : 0)
-                        .disabled(!isActive)
-                        .allowsHitTesting(isActive)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        // Inactive tabs are rotated out of view
-                        .rotationEffect(
-                            isActive ? .zero : .degrees(90),
-                            anchor: .topLeading
-                        )
-                }
+        GeometryReader { geometry in
+            if tabInfoArray[id: selectedTabId] != nil,
+               let tab = chatTabPool.getTab(of: selectedTabId) {
+                tab.body
+                    .frame(
+                        width: geometry.size.width,
+                        height: geometry.size.height
+                    )
+            } else {
+                // Fallback if selected tab is not found
+                EmptyView()
             }
         }
     }
@@ -510,7 +510,7 @@ struct CreateOtherChatTabMenuStyle: MenuStyle {
     func makeBody(configuration: Configuration) -> some View {
         Image(systemName: "chevron.down")
             .resizable()
-            .frame(width: 7, height: 4)
+            .scaledFrame(width: 7, height: 4)
             .frame(maxHeight: .infinity)
             .padding(.leading, 4)
             .padding(.trailing, 8)

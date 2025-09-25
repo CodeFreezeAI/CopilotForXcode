@@ -23,7 +23,6 @@ public struct BorderedProminentWhiteButtonStyle: ButtonStyle {
             .overlay(
                 RoundedRectangle(cornerRadius: 5).stroke(.clear, lineWidth: 1)
             )
-            .shadow(color: .black.opacity(0.05), radius: 0, x: 0, y: 0)
-            .shadow(color: .black.opacity(0.3), radius: 1.25, x: 0, y: 0.5)
     }
 }
+

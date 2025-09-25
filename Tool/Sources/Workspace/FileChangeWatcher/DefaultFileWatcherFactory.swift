@@ -13,12 +13,18 @@ public class DefaultFileWatcherFactory: FileWatcherFactory {
         )
     }
 
-    public func createDirectoryWatcher(watchedPaths: [URL], changePublisher: @escaping PublisherType,
-                                publishInterval: TimeInterval) -> DirectoryWatcherProtocol {
-        return BatchingFileChangeWatcher(watchedPaths: watchedPaths,
-                                         changePublisher: changePublisher,
-                                         publishInterval: publishInterval,
-                                         fsEventProvider: FileChangeWatcherFSEventProvider()
+    public func createDirectoryWatcher(
+        watchedPaths: [URL], 
+        changePublisher: @escaping PublisherType,
+        publishInterval: TimeInterval,
+        directoryChangePublisher: PublisherType? = nil
+    ) -> DirectoryWatcherProtocol {
+        return BatchingFileChangeWatcher(
+            watchedPaths: watchedPaths,
+            changePublisher: changePublisher,
+            publishInterval: publishInterval,
+            fsEventProvider: FileChangeWatcherFSEventProvider(),
+            directoryChangePublisher: directoryChangePublisher
         )
     }
 }

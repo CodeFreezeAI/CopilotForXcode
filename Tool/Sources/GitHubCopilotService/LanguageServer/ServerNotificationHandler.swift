@@ -35,10 +35,13 @@ class ServerNotificationHandlerImpl: ServerNotificationHandler {
             }
         } else {
             switch methodName {
-            case "featureFlagsNotification":
+            case "copilot/didChangeFeatureFlags":
                 if let data = try? JSONEncoder().encode(notification.params),
-                    let featureFlags = try? JSONDecoder().decode(FeatureFlags.self, from: data) {
-                    featureFlagNotifier.handleFeatureFlagNotification(featureFlags)
+                   let didChangeFeatureFlagsParams = try? JSONDecoder().decode(
+                    DidChangeFeatureFlagsParams.self,
+                    from: data
+                   ) {
+                    featureFlagNotifier.handleFeatureFlagNotification(didChangeFeatureFlagsParams)
                 }
                 break
             default:

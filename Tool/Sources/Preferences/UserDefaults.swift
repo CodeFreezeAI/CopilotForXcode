@@ -16,6 +16,7 @@ public extension UserDefaults {
         shared.setupDefaultValue(for: \.realtimeSuggestionDebounce)
         shared.setupDefaultValue(for: \.suggestionPresentationMode)
         shared.setupDefaultValue(for: \.autoAttachChatToXcode)
+        shared.setupDefaultValue(for: \.enableFixError)
         shared.setupDefaultValue(for: \.widgetColorScheme)
         shared.setupDefaultValue(for: \.customCommands)
         shared.setupDefaultValue(
@@ -60,6 +61,10 @@ public extension UserDefaults {
                 ofSize: shared.value(for: \.chatCodeFontSize),
                 weight: .regular
             )))
+        )
+        shared.setupDefaultValue(
+            for: \.fontScale,
+            defaultValue: shared.value(for: \.fontScale)
         )
     }
 }
