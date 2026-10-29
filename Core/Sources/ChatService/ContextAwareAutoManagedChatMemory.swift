@@ -18,6 +18,8 @@ public final class ContextAwareAutoManagedChatMemory: ChatMemory {
             systemPrompt: ""
         )
     }
+    
+    deinit { }
 
     public func mutateHistory(_ update: (inout [ChatMessage]) -> Void) async {
         await memory.mutateHistory(update)

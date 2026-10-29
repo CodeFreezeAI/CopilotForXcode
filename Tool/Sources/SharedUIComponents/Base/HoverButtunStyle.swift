@@ -6,7 +6,7 @@ public struct HoverButtonStyle: ButtonStyle {
     private var padding: CGFloat
     private var hoverColor: Color
     
-    public init(isHovered: Bool = false, padding: CGFloat = 4, hoverColor: Color = Color.gray.opacity(0.1)) {
+    public init(isHovered: Bool = false, padding: CGFloat = 4, hoverColor: Color = .hoverColor) {
         self.isHovered = isHovered
         self.padding = padding
         self.hoverColor = hoverColor

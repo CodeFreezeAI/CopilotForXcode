@@ -16,13 +16,37 @@ public struct ChatTabInfoStore {
     }
     
     public static func getAll(with metadata: StorageMetadata) -> [ChatTabInfo] {
-        var chatTabInfos: [ChatTabInfo] = []
+        return fetchChatTabInfos(.all, metadata: metadata)
+    }
+    
+    public static func getSelected(with metadata: StorageMetadata) -> ChatTabInfo? {
+        return fetchChatTabInfos(.selected, metadata: metadata).first
+    }
+    
+    public static func getLatest(with metadata: StorageMetadata) -> ChatTabInfo? {
+        return fetchChatTabInfos(.latest, metadata: metadata).first
+    }
+    
+    public static func getByID(_ id: String, with metadata: StorageMetadata) -> ChatTabInfo? {
+        return fetchChatTabInfos(.id(id), metadata: metadata).first
+    }
+    
+    private static func fetchChatTabInfos(_ type: ConversationFetchType, metadata: StorageMetadata) -> [ChatTabInfo] {
+        let items = ConversationStorageService.shared.fetchConversationItems(type, metadata: metadata)
         
-        let conversationItems = ConversationStorageService.shared.fetchConversationItems(.all, metadata: metadata)
-        if conversationItems.count > 0 {
-            chatTabInfos = conversationItems.compactMap { ChatTabInfo.from($0, with: metadata) }
+        return items.compactMap { ChatTabInfo.from($0, with: metadata) }
+    }
+}
+
+public struct ChatTabPreviewInfoStore {
+    public static func getAll(with metadata: StorageMetadata) -> [ChatTabPreviewInfo] {
+        var previewInfos: [ChatTabPreviewInfo] = []
+        
+        let conversationPreviewItems = ConversationStorageService.shared.fetchConversationPreviewItems(metadata: metadata)
+        if conversationPreviewItems.count > 0 {
+            previewInfos = conversationPreviewItems.compactMap { ChatTabPreviewInfo.from($0) }
         }
         
-        return chatTabInfos
+        return previewInfos
     }
 }

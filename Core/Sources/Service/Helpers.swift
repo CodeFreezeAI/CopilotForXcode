@@ -1,4 +1,5 @@
 import Foundation
+import GitHubCopilotService
 import LanguageServerProtocol
 
 extension NSError {
@@ -34,6 +35,8 @@ extension NSError {
                 message = "Invalid request: \(error?.localizedDescription ?? "Unknown")."
             case .timeout:
                 message = "Timeout."
+            case .unknownError:
+                message = "Unknown error: \(error.localizedDescription)."
             }
             return NSError(domain: "com.github.CopilotForXcode", code: -1, userInfo: [
                 NSLocalizedDescriptionKey: message,

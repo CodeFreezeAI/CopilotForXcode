@@ -16,16 +16,34 @@ class DiffViewWindowController: NSObject, NSWindowDelegate {
     
     private var diffWindow: NSWindow?
     private var hostingView: NSHostingView<DiffView>?
-    private let chat: StoreOf<Chat>
+    private weak var chat: StoreOf<Chat>?
     public private(set) var currentFileEdit: FileEdit? = nil
     public private(set) var diffViewerState: DiffViewerState = .closed
 
     public init(chat: StoreOf<Chat>) {
         self.chat = chat
     }
+    
+    deinit {
+        // Break the delegate cycle
+        diffWindow?.delegate = nil
+        
+        // Close and release the wi
+        diffWindow?.close()
+        diffWindow = nil
+        
+        // Clear hosting view
+        hostingView = nil
+        
+        // Reset state
+        currentFileEdit = nil
+        diffViewerState = .closed
+    }
 
     @MainActor
     func showDiffWindow(fileEdit: FileEdit) {
+        guard let chat else { return }
+        
         currentFileEdit = fileEdit
         // Create diff view
         let newDiffView = DiffView(chat: chat, fileEdit: fileEdit)

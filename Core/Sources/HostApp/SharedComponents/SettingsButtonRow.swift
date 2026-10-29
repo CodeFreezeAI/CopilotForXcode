@@ -1,4 +1,5 @@
 import SwiftUI
+import Perception
 
 struct SettingsButtonRow<Content: View>: View {
     let title: String
@@ -6,20 +7,22 @@ struct SettingsButtonRow<Content: View>: View {
     @ViewBuilder let content: () -> Content
 
     var body: some View {
-        HStack(alignment: .center, spacing: 8) {
-            VStack(alignment: .leading) {
-                Text(title)
-                    .font(.body)
-                if let subtitle = subtitle {
-                    Text(subtitle)
-                        .font(.footnote)
+        WithPerceptionTracking{
+            HStack(alignment: .center, spacing: 8) {
+                VStack(alignment: .leading) {
+                    Text(title)
+                        .font(.body)
+                    if let subtitle = subtitle {
+                        Text(subtitle)
+                            .font(.footnote)
+                    }
                 }
+                Spacer()
+                content()
             }
-            Spacer()
-            content()
+            .foregroundStyle(.primary)
+            .padding(10)
         }
-        .foregroundStyle(.primary)
-        .padding(10)
     }
 }
 

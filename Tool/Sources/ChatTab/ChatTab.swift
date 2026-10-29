@@ -2,6 +2,21 @@ import ComposableArchitecture
 import Foundation
 import SwiftUI
 
+/// Preview info used in ChatHistoryView
+public struct ChatTabPreviewInfo: Identifiable, Equatable, Codable {
+    public let id: String
+    public let title: String?
+    public let isSelected: Bool
+    public let updatedAt: Date
+    
+    public init(id: String, title: String?, isSelected: Bool, updatedAt: Date) {
+        self.id = id
+        self.title = title
+        self.isSelected = isSelected
+        self.updatedAt = updatedAt
+    }
+}
+
 /// The information of a tab.
 @ObservableState
 public struct ChatTabInfo: Identifiable, Equatable, Codable {

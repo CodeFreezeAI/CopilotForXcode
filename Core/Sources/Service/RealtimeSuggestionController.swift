@@ -153,7 +153,7 @@ public actor RealtimeSuggestionController {
             
             // check if user loggin
             let authStatus = await Status.shared.getAuthStatus()
-            guard authStatus == .loggedIn else { return }
+            guard authStatus.status == .loggedIn else { return }
 
             guard UserDefaults.shared.value(for: \.realtimeSuggestionToggle)
             else { return }

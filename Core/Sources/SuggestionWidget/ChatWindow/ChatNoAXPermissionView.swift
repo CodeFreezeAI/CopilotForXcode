@@ -18,11 +18,11 @@ struct ChatNoAXPermissionView: View {
                         .foregroundColor(.primary)
                     
                     Text("Accessibility Permission Required")
-                        .font(.largeTitle)
+                        .scaledFont(.largeTitle)
                         .multilineTextAlignment(.center)
                     
                     Text("Please grant accessibility permission for Github Copilot to work with Xcode.")
-                        .font(.body)
+                        .scaledFont(.body)
                         .multilineTextAlignment(.center)
                     
                     HStack{
@@ -31,6 +31,7 @@ struct ChatNoAXPermissionView: View {
                                 openURL(url)
                             }
                         }
+                        .scaledFont(.body)
                         .buttonStyle(.borderedProminent)
                     }
                     

@@ -18,13 +18,8 @@ public struct UpvoteButton: View {
             Image(systemName: isSelected ? "hand.thumbsup.fill" : "hand.thumbsup")
                 .resizable()
                 .aspectRatio(contentMode: .fit)
-                .frame(width: 14, height: 14)
-//                .frame(width: 20, height: 20, alignment: .center)
+                .scaledFrame(width: 14, height: 14)
                 .foregroundColor(.secondary)
-//                .background(
-//                    .regularMaterial,
-//                    in: RoundedRectangle(cornerRadius: 4, style: .circular)
-//                )
                 .padding(4)
                 .help("Helpful")
         }

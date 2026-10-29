@@ -97,6 +97,20 @@ public final class ConversationStorageService: ConversationStorageServiceProtoco
         return items
     }
     
+    public func fetchConversationPreviewItems(metadata: StorageMetadata) -> [ConversationPreviewItem] {
+        var items: [ConversationPreviewItem] = []
+        
+        do {
+            try withStorage(metadata) { conversationStorage in
+                items = try conversationStorage.fetchConversationPreviewItems()
+            }
+        } catch {
+            Logger.client.error("Failed to fetch conversation preview items: \(error)")
+        }
+        
+        return items
+    }
+    
     public func fetchTurnItems(for conversationID: String, metadata: StorageMetadata) -> [TurnItem] {
         var items: [TurnItem] = []
         

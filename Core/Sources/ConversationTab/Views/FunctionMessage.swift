@@ -4,82 +4,84 @@ import ChatService
 import SharedUIComponents
 import ComposableArchitecture
 import ChatTab
+import GitHubCopilotService
 
 struct FunctionMessage: View {
-    let chat: StoreOf<Chat>
-    let id: String
     let text: String
+    let chat: StoreOf<Chat>
     @AppStorage(\.chatFontSize) var chatFontSize
     @Environment(\.openURL) private var openURL
     
-    private let displayFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .long
-        formatter.timeStyle = .short
-        return formatter
-    }()
-    
-    private func extractDate(from text: String) -> Date? {
-        guard let match = (try? NSRegularExpression(pattern: "until (.*?) for"))?
-                    .firstMatch(in: text, options: [], range: NSRange(location: 0, length: text.utf16.count)),
-            let dateRange = Range(match.range(at: 1), in: text) else {
-            return nil
-        }
+    private var isFreePlanUser: Bool {
+        text.contains("30-day free trial")
+    }
 
-        let dateString = String(text[dateRange])
-        let formatter = DateFormatter()
-        formatter.dateFormat = "M/d/yyyy, h:mm:ss a"
-        return formatter.date(from: dateString)
+    private var isOrgUser: Bool {
+        text.contains("reach out to your organization's Copilot admin")
+    }
+
+    private var switchToFallbackModelText: String {
+        if let fallbackModelName = CopilotModelManager.getFallbackLLM(
+            scope: chat.isAgentMode ? .agentPanel : .chatPanel
+        )?.modelName {
+            return "We have automatically switched you to \(fallbackModelName) which is included with your plan."
+        } else {
+            return ""
+        }
+    }
+
+    private var errorContent: Text {
+        switch (isFreePlanUser, isOrgUser) {
+        case (true, _):
+            return Text("Monthly message limit reached. Upgrade to Copilot Pro (30-day free trial) or wait for your limit to reset.")
+            
+        case (_, true):
+            let parts = [
+                "You have exceeded your free request allowance.",
+                switchToFallbackModelText,
+                "To enable additional paid premium requests, contact your organization admin."
+            ].filter { !$0.isEmpty }
+            return Text(attributedString(from: parts))
+
+        default:
+            let parts = [
+                "You have exceeded your premium request allowance.",
+                switchToFallbackModelText,
+                "[Enable additional paid premium requests](https://aka.ms/github-copilot-manage-overage) to continue using premium models."
+            ].filter { !$0.isEmpty }
+            return Text(attributedString(from: parts))
+        }
+    }
+    
+    private func attributedString(from parts: [String]) -> AttributedString {
+        do {
+            return try AttributedString(markdown: parts.joined(separator: " "))
+        } catch {
+            return AttributedString(parts.joined(separator: " "))
+        }
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Image("CopilotLogo")
-                    .resizable()
-                    .renderingMode(.template)
-                    .scaledToFill()
-                    .frame(width: 12, height: 12)
-                    .overlay(
-                        Circle()
-                            .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
-                            .frame(width: 24, height: 24)
-                    )
-                    .padding(.leading, 8)
-                
-                Text("GitHub Copilot")
-                    .font(.system(size: 13))
-                    .fontWeight(.semibold)
-                    .padding(4)
-                    
-                Spacer()
-            }
+        NotificationBanner(style: .warning) {
+            errorContent
             
-            VStack(alignment: .leading, spacing: 16) {
-                Text("You've reached your monthly chat limit for GitHub Copilot Free.")
-                    .font(.system(size: 13))
-                    .fontWeight(.medium)
-                
-                if let date = extractDate(from: text) {
-                    Text("Upgrade to Copilot Pro with a 30-day free trial or wait until \(displayFormatter.string(from: date)) for your limit to reset.")
-                        .font(.system(size: 13))
-                }
-                
+            if isFreePlanUser {
                 Button("Update to Copilot Pro") {
-                    if let url = URL(string: "https://github.com/github-copilot/signup/copilot_individual") {
+                    if let url = URL(string: "https://aka.ms/github-copilot-upgrade-plan") {
                         openURL(url)
                     }
                 }
                 .buttonStyle(.borderedProminent)
-                .controlSize(.large)
+                .controlSize(.regular)
+                .scaledFont(.body)
+                .onHover { isHovering in
+                    if isHovering {
+                        NSCursor.pointingHand.push()
+                    } else {
+                        NSCursor.pop()
+                    }
+                }
             }
-            .padding(.vertical, 10)
-            .padding(.horizontal, 12)
-            .overlay(
-                RoundedRectangle(cornerRadius: 6)
-                    .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
-            )
-            .padding(.vertical, 4)
         }
     }
 }
@@ -88,9 +90,8 @@ struct FunctionMessage_Previews: PreviewProvider {
     static var previews: some View {
         let chatTabInfo = ChatTabInfo(id: "id", workspacePath: "path", username: "name")
         FunctionMessage(
-            chat: .init(initialState: .init(), reducer: { Chat(service: ChatService.service(for: chatTabInfo)) }),
-            id: "1",
-            text: "You've reached your monthly chat limit. Upgrade to Copilot Pro (30-day free trial) or wait until 1/17/2025, 8:00:00 AM for your limit to reset."
+            text: "You've reached your monthly chat limit. Upgrade to Copilot Pro (30-day free trial) or wait until 1/17/2025, 8:00:00 AM for your limit to reset.",
+            chat: .init(initialState: .init(), reducer: { Chat(service: ChatService.service(for: chatTabInfo)) })
         )
         .padding()
         .fixedSize()

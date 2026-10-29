@@ -1,4 +1,5 @@
 import Foundation
+import SystemUtils
 import Logger
 import Combine
 
@@ -45,7 +46,7 @@ class ShellProcessManager {
         
         // Configure the process
         process?.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        process?.arguments = ["-i"]
+        process?.arguments = ["-i", "-l"]
         
         // Create temporary file for shell integration
         let tempDir = FileManager.default.temporaryDirectory
@@ -68,11 +69,13 @@ class ShellProcessManager {
         
         var environment = ProcessInfo.processInfo.environment
         // Fetch login shell environment to get correct PATH
-        if let shellEnv = ShellProcessManager.getLoginShellEnvironment() {
+        if let shellEnv = SystemUtils.shared.getLoginShellEnvironment(shellPath: "/bin/zsh") {
             for (key, value) in shellEnv {
                 environment[key] = value
             }
         }
+        // Append common bin paths to PATH
+        environment["PATH"] = SystemUtils.shared.appendCommonBinPaths(path: environment["PATH"] ?? "")
 
         let userZdotdir = environment["ZDOTDIR"] ?? NSHomeDirectory()
         environment["ZDOTDIR"] = zshdir.path
@@ -105,33 +108,6 @@ class ShellProcessManager {
         } catch {
             onOutputReceived?("Failed to start shell: \(error.localizedDescription)\r\n")
             Logger.client.error("Failed to start shell: \(error.localizedDescription)")
-        }
-    }
-
-    /// Returns the environment of a login shell (to get correct PATH and other variables)
-    private static func getLoginShellEnvironment() -> [String: String]? {
-        let task = Process()
-        let pipe = Pipe()
-        task.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        task.arguments = ["-l", "-c", "env"]
-        task.standardOutput = pipe
-        do {
-            try task.run()
-            task.waitUntilExit()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            guard let output = String(data: data, encoding: .utf8) else { return nil }
-            var env: [String: String] = [:]
-            for line in output.split(separator: "\n") {
-                if let idx = line.firstIndex(of: "=") {
-                    let key = String(line[..<idx])
-                    let value = String(line[line.index(after: idx)...])
-                    env[key] = value
-                }
-            }
-            return env
-        } catch {
-            Logger.client.error("Failed to get login shell environment: \(error.localizedDescription)")
-            return nil
         }
     }
 

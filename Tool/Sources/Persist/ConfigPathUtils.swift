@@ -62,8 +62,12 @@ struct ConfigPathUtils {
         if !fileManager.fileExists(atPath: url.path) {
             do {
                 try fileManager.createDirectory(at: url, withIntermediateDirectories: true, attributes: nil)
-            } catch {
-                Logger.client.info("Failed to create directory: \(error)")
+            } catch let error as NSError {
+                if error.domain == NSPOSIXErrorDomain && error.code == EACCES {
+                    Logger.client.error("Permission denied when trying to create directory: \(url.path)")
+                } else {
+                    Logger.client.info("Failed to create directory: \(error)")
+                }
             }
         }
     }

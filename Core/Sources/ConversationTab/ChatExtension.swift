@@ -6,11 +6,12 @@ extension Chat.State {
         guard let currentFile = self.currentEditor, isCurrentEditorContextEnabled else {
             return []
         }
-        let fileReference = FileReference(
+        let fileReference = ConversationFileReference(
             url: currentFile.url,
             relativePath: currentFile.relativePath,
             fileName: currentFile.fileName,
-            isCurrentEditor: currentFile.isCurrentEditor
+            isCurrentEditor: currentFile.isCurrentEditor,
+            selection: currentFile.selection
         )
         return [CurrentEditorSkill(currentFile: fileReference), ProblemsInActiveDocumentSkill()]
     }

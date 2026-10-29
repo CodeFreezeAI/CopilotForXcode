@@ -1,4 +1,5 @@
 import Combine
+import Client
 import SwiftUI
 import Toast
 
@@ -11,7 +12,8 @@ struct EnterpriseSection: View {
             SettingsTextField(
                 title: "Auth provider URL",
                 prompt: "https://your-enterprise.ghe.com",
-                text: DebouncedBinding($gitHubCopilotEnterpriseURI, handler: urlChanged).binding
+                text: $gitHubCopilotEnterpriseURI,
+                onDebouncedChange: { url in urlChanged(url)}
             )
         }
     }
@@ -24,15 +26,26 @@ struct EnterpriseSection: View {
             name: .gitHubCopilotShouldRefreshEditorInformation,
             object: nil
         )
+        Task {
+            do {
+                let service = try getService()
+                try await service.postNotification(
+                    name: Notification.Name
+                        .gitHubCopilotShouldRefreshEditorInformation.rawValue
+                )
+            } catch {
+                toast(error.localizedDescription, .error)
+            }
+        }
     }
 
     func validateAuthURL(_ url: String) {
         let maybeURL = URL(string: url)
-        guard let parsedURl = maybeURL else {
+        guard let parsedURL = maybeURL else {
             toast("Invalid URL", .error)
             return
         }
-        if parsedURl.scheme != "https" {
+        if parsedURL.scheme != "https" {
             toast("URL scheme must be https://", .error)
             return
         }

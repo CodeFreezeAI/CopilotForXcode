@@ -10,6 +10,7 @@ import SuggestionBasic
 import SuggestionWidget
 import PersistMiddleware
 import ChatService
+import Persist
 
 #if canImport(ChatTabPersistent)
 import ChatTabPersistent
@@ -84,6 +85,23 @@ struct GUI {
                         return .run { send in
                             if let (_, chatTabInfo) = await chatTabPool.createTab(for: kind, with: currentChatWorkspace) {
                                 await send(.appendAndSelectTab(chatTabInfo))
+                            }
+                        }
+                    case .restoreTabByInfo(let info):
+                        guard let currentChatWorkspace = state.currentChatWorkspace else { return .none }
+                        
+                        return .run { send in
+                            if let _ = await chatTabPool.restoreTab(by: info, with: currentChatWorkspace) {
+                                await send(.appendAndSelectTab(info))
+                            }
+                        }
+                        
+                    case .createNewTabByID(let id):
+                        guard let currentChatWorkspace = state.currentChatWorkspace else { return .none }
+                        
+                        return .run { send in
+                            if let (_, info) = await chatTabPool.createTab(id: id, with: currentChatWorkspace) {
+                                await send(.appendAndSelectTab(info))
                             }
                         }
 
@@ -263,6 +281,7 @@ struct GUI {
                             await send(.openChatPanel(forceDetach: false))
                             await stopAndHandleCommand(chatTab)
                             await send(.suggestionWidget(.chatPanel(.saveChatTabInfo([originalTab, currentTab], chatWorkspace))))
+                            await send(.suggestionWidget(.chatPanel(.syncChatTabInfo([originalTab, currentTab]))))
                         }
                     }
 
@@ -421,11 +440,17 @@ extension ChatTabPool {
     @MainActor
     func createTab(
         id: String = UUID().uuidString,
-        from builder: ChatTabBuilder,
+        from builder: ChatTabBuilder? = nil,
         with chatWorkspace: ChatWorkspace
     ) async -> (any ChatTab, ChatTabInfo)? {
         let id = id
         let info = ChatTabInfo(id: id, workspacePath: chatWorkspace.workspacePath, username: chatWorkspace.username)
+        guard let builder else {
+            let chatTab = ConversationTab(store: createStore(info), with: info)
+            setTab(chatTab)
+            return (chatTab, info)
+        }
+        
         guard let chatTab = await builder.build(store: createStore(info)) else { return nil }
         setTab(chatTab)
         return (chatTab, info)
@@ -448,6 +473,16 @@ extension ChatTabPool {
         setTab(chatTab)
         return (chatTab, info)
     }
+    
+    @MainActor
+    func restoreTab(
+        by info: ChatTabInfo,
+        with chaWorkspace: ChatWorkspace
+    ) async -> (any ChatTab)? {
+        let chatTab = ConversationTab.restoreConversation(by: info, store: createStore(info))
+        setTab(chatTab)
+        return chatTab
+    }
 }
 
 
@@ -461,23 +496,22 @@ extension GraphicalUserInterfaceController {
         // only restore once regardless of success or fail
         restoredChatHistory.insert(workspaceIdentifier)
         
-        let storedChatTabInfos = ChatTabInfoStore.getAll(with: .init(workspacePath: workspacePath, username: username))
-        if storedChatTabInfos.count > 0
-        {
-            var tabInfo: IdentifiedArray<String, ChatTabInfo> = []
-            for info in storedChatTabInfos {
-                tabInfo[id: info.id] = info
-                let chatTab = ConversationTab.restoreConversation(by: info, store: chatTabPool.createStore(info))
-                chatTabPool.setTab(chatTab)
-            }
+        let metadata = StorageMetadata(workspacePath: workspacePath, username: username)
+        let selectedChatTabInfo = ChatTabInfoStore.getSelected(with: metadata) ?? ChatTabInfoStore.getLatest(with: metadata)
+        
+        if let selectedChatTabInfo {
+            let chatTab = ConversationTab.restoreConversation(by: selectedChatTabInfo, store: chatTabPool.createStore(selectedChatTabInfo))
+            chatTabPool.setTab(chatTab)
             
             let chatWorkspace = ChatWorkspace(
                 id: .init(path: workspacePath, username: username),
-                tabInfo: tabInfo,
+                tabInfo: [selectedChatTabInfo],
                 tabCollection: [],
-                selectedTabId: storedChatTabInfos.first(where: { $0.isSelected })?.id
-            )
-            self.store.send(.suggestionWidget(.chatPanel(.restoreWorkspace(chatWorkspace))))
+                selectedTabId: selectedChatTabInfo.id
+            ) { [weak self] in
+                self?.chatTabPool.removeTab(of: $0)
+            }
+            await self.store.send(.suggestionWidget(.chatPanel(.restoreWorkspace(chatWorkspace)))).finish()
         }
     }
 }

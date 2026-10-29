@@ -1,5 +1,7 @@
 import AppKit
 import Foundation
+import XcodeInspector
+import ConversationServiceProvider
 
 public struct WidgetLocation: Equatable {
     struct PanelLocation: Equatable {
@@ -319,14 +321,92 @@ enum UpdateLocationStrategy {
         return selectionFrame
     }
     
-    static func getChatPanelFrame(_ screen: NSScreen) -> CGRect {
+    static func getChatPanelFrame(_ screen: NSScreen? = nil) -> CGRect {
+        let screen = screen ??  NSScreen.main ?? NSScreen.screens.first!
+        
         let visibleScreenFrame = screen.visibleFrame
-        // avoid too wide
+        
+        // Default Frame
         let width = min(Style.panelWidth, visibleScreenFrame.width * 0.3)
         let height = visibleScreenFrame.height
-        let x = visibleScreenFrame.width - width
-                
-        return CGRect(x: x, y: visibleScreenFrame.height, width: width, height: height)
+        let x = visibleScreenFrame.maxX - width
+        let y = visibleScreenFrame.minY
+        
+        return CGRect(x: x, y: y, width: width, height: height)
+    }
+    
+    static func getAttachedChatPanelFrame(_ screen: NSScreen, workspaceWindowElement: AXUIElement) -> CGRect {
+        guard let xcodeScreen = workspaceWindowElement.maxIntersectionScreen,
+              let xcodeRect = workspaceWindowElement.rect,
+              let mainDisplayScreen = NSScreen.screens.first(where: { $0.frame.origin == .zero })
+        else {
+            return getChatPanelFrame()
+        }
+        
+        let minWidth = Style.minChatPanelWidth
+        let visibleXcodeScreenFrame = xcodeScreen.visibleFrame
+        
+        let width = max(visibleXcodeScreenFrame.maxX - xcodeRect.maxX, minWidth)
+        let height = xcodeRect.height
+        let x = visibleXcodeScreenFrame.maxX - width
+        
+        // AXUIElement coordinates: Y=0 at top-left
+        // NSWindow coordinates: Y=0 at bottom-left
+        let y = mainDisplayScreen.frame.maxY - xcodeRect.maxY + mainDisplayScreen.frame.minY
+        
+        return CGRect(x: x, y: y, width: width, height: height)
     }
 }
 
+public struct CodeReviewLocationStrategy {
+    static func calculateCurrentLineNumber(
+        for originalLineNumber: Int, // 1-based
+        originalLines: [String],
+        currentLines: [String]
+    ) -> Int {
+        let difference = currentLines.difference(from: originalLines)
+
+        let targetIndex = originalLineNumber
+        var adjustment = 0
+
+        for change in difference {
+            switch change {
+            case .insert(let offset, _, _):
+                // Inserted at or before target line
+                if offset <= targetIndex + adjustment {
+                    adjustment += 1
+                }
+            case .remove(let offset, _, _):
+                // Deleted at or before target line
+                if offset <= targetIndex + adjustment {
+                    adjustment -= 1
+                }
+            }
+        }
+
+        return targetIndex + adjustment
+    }
+
+    static func getCurrentLineFrame(
+        editor: AXUIElement, 
+        currentContent: String,
+        comment: ReviewComment, 
+        originalContent: String
+    ) -> (lineNumber: Int?, lineFrame: CGRect?) {
+        let originalLines = originalContent.components(separatedBy: .newlines)
+        let currentLines = currentContent.components(separatedBy: .newlines)
+
+        let originalLineNumber = comment.range.end.line
+        let currentLineNumber = calculateCurrentLineNumber(
+            for: originalLineNumber,
+            originalLines: originalLines,
+            currentLines: currentLines
+        ) // 0-based
+        
+        guard let rect = LocationStrategyHelper.getLineFrame(currentLineNumber, in: editor, with: currentLines) else {
+            return (nil, nil)
+        }
+        
+        return (currentLineNumber, rect)
+    }
+}

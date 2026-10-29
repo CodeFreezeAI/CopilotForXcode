@@ -34,11 +34,20 @@ public class SourceEditor {
     /// To prevent expensive calculations in ``getContent()``.
     private let cache = Cache()
     
+    public var appElement: AXUIElement { .fromRunningApplication(runningApplication) }
+    
+    public var realtimeDocumentURL: URL? { 
+        appElement.realtimeDocumentURL
+    }
+    
+    public var realtimeWorkspaceURL: URL? {
+        appElement.realtimeWorkspaceURL
+    }
+    
     public func getLatestEvaluatedContent() -> Content {
         let selectionRange = element.selectedTextRange
         let (content, lines, selections) = cache.latest()
         let lineAnnotationElements = element.children.filter { $0.identifier == "Line Annotation" }
-        let lineAnnotations = lineAnnotationElements.map(\.description)
 
         return .init(
             content: content,
@@ -46,7 +55,7 @@ public class SourceEditor {
             selections: selections,
             cursorPosition: selections.first?.start ?? .outOfScope,
             cursorOffset: selectionRange?.lowerBound ?? 0,
-            lineAnnotations: lineAnnotations
+            lineAnnotationElements: lineAnnotationElements
         )
     }
 
@@ -60,7 +69,6 @@ public class SourceEditor {
         let (lines, selections) = cache.get(content: content, selectedTextRange: selectionRange)
 
         let lineAnnotationElements = element.children.filter { $0.identifier == "Line Annotation" }
-        let lineAnnotations = lineAnnotationElements.map(\.description)
 
         axNotifications.send(.init(kind: .evaluatedContentChanged, element: element))
 
@@ -70,7 +78,7 @@ public class SourceEditor {
             selections: selections,
             cursorPosition: selections.first?.start ?? .outOfScope,
             cursorOffset: selectionRange?.lowerBound ?? 0,
-            lineAnnotations: lineAnnotations
+            lineAnnotationElements: lineAnnotationElements
         )
     }
 
@@ -294,3 +302,9 @@ public extension SourceEditor {
     }
 }
 
+extension SourceEditor: Equatable {
+    public static func ==(lhs: SourceEditor, rhs: SourceEditor) -> Bool {
+        return lhs.runningApplication.processIdentifier == rhs.runningApplication.processIdentifier
+            && lhs.element == rhs.element 
+    }
+}

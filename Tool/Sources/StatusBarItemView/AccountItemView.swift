@@ -38,7 +38,7 @@ public class AccountItemView: NSView {
         self.visualEffect.isHidden = true
         self.visualEffect.wantsLayer = true
         self.visualEffect.layer?.cornerRadius = 4
-        self.visualEffect.layer?.backgroundColor = NSColor.systemBlue.cgColor
+        self.visualEffect.layer?.backgroundColor = NSColor.controlAccentColor.cgColor
         self.visualEffect.isEmphasized = true
 
         // Initialize with a reasonable starting size

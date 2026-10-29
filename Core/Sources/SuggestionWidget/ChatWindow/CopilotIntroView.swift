@@ -76,15 +76,15 @@ struct CopilotIntroItemView: View {
                         .padding(.leading, 8)
                         
                     Text(title)
-                        .font(.body)
                         .kerning(0.096)
+                        .scaledFont(.body)
                         .multilineTextAlignment(.center)
                         .foregroundColor(.primary)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                     
                 Text(description)
-                    .font(.body)
+                    .scaledFont(.body)
                     .foregroundColor(.secondary)
                     .padding(.leading, 28)
                     .padding(.top, 4)

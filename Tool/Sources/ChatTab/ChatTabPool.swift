@@ -27,6 +27,8 @@ public final class ChatTabPool {
     }
 
     public func removeTab(of id: String) {
+        guard getTab(of: id) != nil else { return }
+        
         pool.removeValue(forKey: id)
     }
 }

@@ -33,19 +33,24 @@ struct DisabledLanguageList: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                Button(action: {
-                    self.isOpen.wrappedValue = false
-                }) {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.secondary)
-                        .padding()
+            ZStack(alignment: .topLeading) {
+                Rectangle().fill(Color(nsColor: .separatorColor)).frame(height: 28)
+ 
+                HStack {
+                    Button(action: {
+                        self.isOpen.wrappedValue = false
+                    }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                            .padding()
+                    }
+                    .buttonStyle(.plain)
+                    Text("Disabled Languages")
+                        .font(.system(size: 13, weight: .bold))
+                    Spacer()
                 }
-                .buttonStyle(.plain)
-                Text("Disabled Languages")
-                Spacer()
+                .frame(height: 28)
             }
-            .background(Color(nsColor: .separatorColor))
 
             List {
                 ForEach(

@@ -12,8 +12,10 @@ public struct General {
     @ObservableState
     public struct State: Equatable {
         var xpcServiceVersion: String?
+        var xpcCLSVersion: String?
         var isAccessibilityPermissionGranted: ObservedAXStatus = .unknown
         var isExtensionPermissionGranted: ExtensionPermissionStatus = .unknown
+        var xpcServiceAuthStatus: AuthStatus = .init(status: .unknown)
         var isReloading = false
     }
 
@@ -24,8 +26,10 @@ public struct General {
         case reloadStatus
         case finishReloading(
             xpcServiceVersion: String,
+            xpcCLSVersion: String?,
             axStatus: ObservedAXStatus,
-            extensionStatus: ExtensionPermissionStatus
+            extensionStatus: ExtensionPermissionStatus,
+            authStatus: AuthStatus
         )
         case failedReloading
         case retryReloading
@@ -90,10 +94,14 @@ public struct General {
                             let isAccessibilityPermissionGranted = try await service
                                 .getXPCServiceAccessibilityPermission()
                             let isExtensionPermissionGranted = try await service.getXPCServiceExtensionPermission()
+                            let xpcServiceAuthStatus = try await service.getXPCServiceAuthStatus() ?? .init(status: .unknown)
+                            let xpcCLSVersion = try await service.getXPCCLSVersion()
                             await send(.finishReloading(
                                 xpcServiceVersion: xpcServiceVersion,
+                                xpcCLSVersion: xpcCLSVersion,
                                 axStatus: isAccessibilityPermissionGranted,
-                                extensionStatus: isExtensionPermissionGranted
+                                extensionStatus: isExtensionPermissionGranted,
+                                authStatus: xpcServiceAuthStatus
                             ))
                         } else {
                             toast("Launching service app.", .info)
@@ -114,10 +122,12 @@ public struct General {
                     }
                 }.cancellable(id: ReloadStatusCancellableId(), cancelInFlight: true)
 
-            case let .finishReloading(version, axStatus, extensionStatus):
+            case let .finishReloading(version, clsVersion, axStatus, extensionStatus, authStatus):
                 state.xpcServiceVersion = version
                 state.isAccessibilityPermissionGranted = axStatus
                 state.isExtensionPermissionGranted = extensionStatus
+                state.xpcServiceAuthStatus = authStatus
+                state.xpcCLSVersion = clsVersion
                 state.isReloading = false
                 return .none
 

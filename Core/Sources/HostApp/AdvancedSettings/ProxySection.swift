@@ -15,37 +15,38 @@ struct ProxySection: View {
             SettingsTextField(
                 title: "Proxy URL",
                 prompt: "http://host:port",
-                text: wrapBinding($gitHubCopilotProxyUrl)
+                text: $gitHubCopilotProxyUrl,
+                onDebouncedChange: { _ in refreshConfiguration() }
             )
             SettingsTextField(
                 title: "Proxy username",
                 prompt: "username",
-                text: wrapBinding($gitHubCopilotProxyUsername)
+                text: $gitHubCopilotProxyUsername,
+                onDebouncedChange: { _ in refreshConfiguration() }
             )
-            SettingsSecureField(
+            SettingsTextField(
                 title: "Proxy password",
                 prompt: "password",
-                text: wrapBinding($gitHubCopilotProxyPassword)
+                text: $gitHubCopilotProxyPassword,
+                isSecure: true,
+                onDebouncedChange: { _ in refreshConfiguration() }
             )
             SettingsToggle(
                 title: "Proxy strict SSL",
-                isOn: wrapBinding($gitHubCopilotUseStrictSSL)
+                isOn: $gitHubCopilotUseStrictSSL
             )
+            .onChange(of: gitHubCopilotUseStrictSSL) { _ in refreshConfiguration() }
         }
     }
 
-    private func wrapBinding<T>(_ b: Binding<T>) -> Binding<T> {
-        DebouncedBinding(b, handler: refreshConfiguration).binding
-    }
-
-    func refreshConfiguration(_: Any) {
+    func refreshConfiguration() {
         NotificationCenter.default.post(
             name: .gitHubCopilotShouldRefreshEditorInformation,
             object: nil
         )
         Task {
-            let service = try getService()
             do {
+                let service = try getService()
                 try await service.postNotification(
                     name: Notification.Name
                         .gitHubCopilotShouldRefreshEditorInformation.rawValue

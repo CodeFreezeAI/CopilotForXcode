@@ -116,6 +116,11 @@ public struct UserDefaultPreferenceKeys {
         defaultValue: false,
         key: "ExtensionPermissionShown"
     )
+    
+    public let capturePermissionShown = PreferenceKey(
+        defaultValue: false,
+        key: "CapturePermissionShown"
+    )
 }
 
 // MARK: - Prompt to Code
@@ -238,6 +243,10 @@ public extension UserDefaultPreferenceKeys {
 // MARK: - Chat
 
 public extension UserDefaultPreferenceKeys {
+    
+    var fontScale: PreferenceKey<Double> {
+        .init(defaultValue: 1.0, key: "FontScale")
+    }
 
     var chatFontSize: PreferenceKey<Double> {
         .init(defaultValue: 13, key: "ChatFontSize")
@@ -294,6 +303,22 @@ public extension UserDefaultPreferenceKeys {
 
     var enableCurrentEditorContext: PreferenceKey<Bool> {
         .init(defaultValue: true, key: "EnableCurrentEditorContext")
+    }
+    
+    var chatResponseLocale: PreferenceKey<String> {
+        .init(defaultValue: "en", key: "ChatResponseLocale")
+    }
+
+    var globalCopilotInstructions: PreferenceKey<String> {
+        .init(defaultValue: "", key: "GlobalCopilotInstructions")
+    }
+    
+    var autoAttachChatToXcode: PreferenceKey<Bool> {
+        .init(defaultValue: true, key: "AutoAttachChatToXcode")
+    }
+    
+    var enableFixError: PreferenceKey<Bool> {
+        .init(defaultValue: true, key: "EnableFixError")
     }
 }
 
@@ -558,6 +583,10 @@ public extension UserDefaultPreferenceKeys {
     var gitHubCopilotMCPConfig: PreferenceKey<String> {
         .init(defaultValue: "", key: "GitHubCopilotMCPConfig")
     }
+    
+    var gitHubCopilotMCPUpdatedStatus: PreferenceKey<String> {
+        .init(defaultValue: "", key: "GitHubCopilotMCPUpdatedStatus")
+    }
 
     var gitHubCopilotEnterpriseURI: PreferenceKey<String> {
         .init(defaultValue: "", key: "GitHubCopilotEnterpriseURI")
@@ -565,5 +594,9 @@ public extension UserDefaultPreferenceKeys {
 
     var verboseLoggingEnabled: PreferenceKey<Bool> {
         .init(defaultValue: false, key: "VerboseLoggingEnabled")
+    }
+    
+    var currentUserName: PreferenceKey<String> {
+        .init(defaultValue: "", key: "CurrentUserName")
     }
 }

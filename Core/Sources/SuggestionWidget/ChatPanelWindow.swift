@@ -3,12 +3,15 @@ import ChatTab
 import ComposableArchitecture
 import Foundation
 import SwiftUI
+import ConversationTab
+import SharedUIComponents
 
 final class ChatPanelWindow: NSWindow {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
 
     private let storeObserver = NSObject()
+    private let fontScaleManager: FontScaleManager = .shared
 
     var minimizeWindow: () -> Void = {}
 
@@ -76,6 +79,13 @@ final class ChatPanelWindow: NSWindow {
                 }
             }
         }
+        
+        setInitialFrame()
+    }
+    
+    private func setInitialFrame() {
+        let frame = UpdateLocationStrategy.getChatPanelFrame()
+        setFrame(frame, display: false, animate: true)
     }
 
     func setFloatOnTop(_ isFloatOnTop: Bool) {
@@ -112,5 +122,22 @@ final class ChatPanelWindow: NSWindow {
 
     override func close() {
         minimizeWindow()
+    }
+    
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if event.modifierFlags.contains(.command) {
+            switch event.charactersIgnoringModifiers {
+            case "-":
+                fontScaleManager.decreaseFontScale()
+                return true
+            case "=":
+                fontScaleManager.increaseFontScale()
+                return true
+            default:
+                break
+            }
+        }
+        
+        return super.performKeyEquivalent(with: event)
     }
 }

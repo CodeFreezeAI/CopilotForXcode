@@ -4,57 +4,44 @@ import SuggestionBasic
 
 @objc(XPCServiceProtocol)
 public protocol XPCServiceProtocol {
-    func getSuggestedCode(
-        editorContent: Data,
-        withReply reply: @escaping (_ updatedContent: Data?, Error?) -> Void
-    )
-    func getNextSuggestedCode(
-        editorContent: Data,
-        withReply reply: @escaping (_ updatedContent: Data?, Error?) -> Void
-    )
-    func getPreviousSuggestedCode(
-        editorContent: Data,
-        withReply reply: @escaping (_ updatedContent: Data?, Error?) -> Void
-    )
-    func getSuggestionAcceptedCode(
-        editorContent: Data,
-        withReply reply: @escaping (_ updatedContent: Data?, Error?) -> Void
-    )
-    func getSuggestionRejectedCode(
-        editorContent: Data,
-        withReply reply: @escaping (_ updatedContent: Data?, Error?) -> Void
-    )
-    func getRealtimeSuggestedCode(
-        editorContent: Data,
-        withReply reply: @escaping (Data?, Error?) -> Void
-    )
-    func getPromptToCodeAcceptedCode(
-        editorContent: Data,
-        withReply reply: @escaping (_ updatedContent: Data?, Error?) -> Void
-    )
-    func openChat(
-        withReply reply: @escaping (Error?) -> Void
-    )
-    func promptToCode(
-        editorContent: Data,
-        withReply reply: @escaping (Data?, Error?) -> Void
-    )
-    func customCommand(
-        id: String,
-        editorContent: Data,
-        withReply reply: @escaping (Data?, Error?) -> Void
-    )
-
+    func getSuggestedCode(editorContent: Data, withReply reply: @escaping (_ updatedContent: Data?, Error?) -> Void)
+    func getNextSuggestedCode(editorContent: Data, withReply reply: @escaping (_ updatedContent: Data?, Error?) -> Void)
+    func getPreviousSuggestedCode(editorContent: Data, withReply reply: @escaping (_ updatedContent: Data?, Error?) -> Void)
+    func getSuggestionAcceptedCode(editorContent: Data, withReply reply: @escaping (_ updatedContent: Data?, Error?) -> Void)
+    func getSuggestionRejectedCode(editorContent: Data, withReply reply: @escaping (_ updatedContent: Data?, Error?) -> Void)
+    func getRealtimeSuggestedCode(editorContent: Data, withReply reply: @escaping (Data?, Error?) -> Void)
+    func getPromptToCodeAcceptedCode(editorContent: Data, withReply reply: @escaping (_ updatedContent: Data?, Error?) -> Void)
+    func openChat(withReply reply: @escaping (Error?) -> Void)
+    func promptToCode(editorContent: Data, withReply reply: @escaping (Data?, Error?) -> Void)
+    func customCommand(id: String, editorContent: Data, withReply reply: @escaping (Data?, Error?) -> Void)
     func toggleRealtimeSuggestion(withReply reply: @escaping (Error?) -> Void)
-
-    func prefetchRealtimeSuggestions(
-        editorContent: Data,
-        withReply reply: @escaping () -> Void
-    )
+    func prefetchRealtimeSuggestions(editorContent: Data, withReply reply: @escaping () -> Void)
 
     func getXPCServiceVersion(withReply reply: @escaping (String, String) -> Void)
+    func getXPCCLSVersion(withReply reply: @escaping (String?) -> Void)
     func getXPCServiceAccessibilityPermission(withReply reply: @escaping (ObservedAXStatus) -> Void)
     func getXPCServiceExtensionPermission(withReply reply: @escaping (ExtensionPermissionStatus) -> Void)
+    func getXcodeInspectorData(withReply reply: @escaping (Data?, Error?) -> Void)
+
+    func getAvailableMCPServerToolsCollections(withReply reply: @escaping (Data?) -> Void)
+    func updateMCPServerToolsStatus(tools: Data)
+    func listMCPRegistryServers(_ params: Data, withReply reply: @escaping (Data?, Error?) -> Void)
+    func getMCPRegistryServer(_ params: Data, withReply reply: @escaping (Data?, Error?) -> Void)
+    func getAvailableLanguageModelTools(withReply reply: @escaping (Data?) -> Void)
+    func updateToolsStatus(tools: Data, withReply reply: @escaping (Data?) -> Void)
+
+    func getCopilotFeatureFlags(withReply reply: @escaping (Data?) -> Void)
+
+    func signOutAllGitHubCopilotService()
+    func getXPCServiceAuthStatus(withReply reply: @escaping (Data?) -> Void)
+
+    func saveBYOKApiKey(_ params: Data, withReply reply: @escaping (Data?) -> Void)
+    func listBYOKApiKeys(_ params: Data, withReply reply: @escaping (Data?) -> Void)
+    func deleteBYOKApiKey(_ params: Data, withReply reply: @escaping (Data?) -> Void)
+    func saveBYOKModel(_ params: Data, withReply reply: @escaping (Data?) -> Void)
+    func listBYOKModels(_ params: Data, withReply reply: @escaping (Data?, Error?) -> Void)
+    func deleteBYOKModel(_ params: Data, withReply reply: @escaping (Data?) -> Void)
+
     func postNotification(name: String, withReply reply: @escaping () -> Void)
     func send(endpoint: String, requestBody: Data, reply: @escaping (Data?, Error?) -> Void)
     func quit(reply: @escaping () -> Void)

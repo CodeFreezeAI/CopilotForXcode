@@ -55,6 +55,7 @@ public final class XcodeInspector: ObservableObject {
     @Published public fileprivate(set) var focusedEditor: SourceEditor?
     @Published public fileprivate(set) var focusedElement: AXUIElement?
     @Published public fileprivate(set) var completionPanel: AXUIElement?
+    @Published public fileprivate(set) var latestNonRootWorkspaceURL: URL? = nil
 
     /// Get the content of the source editor.
     ///
@@ -136,6 +137,7 @@ public final class XcodeInspector: ObservableObject {
             focusedEditor = nil
             focusedElement = nil
             completionPanel = nil
+            latestNonRootWorkspaceURL = nil
         }
 
         let runningApplications = NSWorkspace.shared.runningApplications
@@ -283,24 +285,13 @@ public final class XcodeInspector: ObservableObject {
         activeProjectRootURL = xcode.projectRootURL
         activeWorkspaceURL = xcode.workspaceURL
         focusedWindow = xcode.focusedWindow
+        storeLatestNonRootWorkspaceURL(xcode.workspaceURL) // Add this call
 
         let setFocusedElement = { @XcodeInspectorActor [weak self] in
             guard let self else { return }
 
-            func getFocusedElementAndRecordStatus(_ element: AXUIElement) -> AXUIElement? {
-                do {
-                    let focused: AXUIElement = try element.copyValue(key: kAXFocusedUIElementAttribute)
-                    Task { await Status.shared.updateAXStatus(.granted) }
-                    return focused
-                } catch AXError.apiDisabled {
-                    Task { await Status.shared.updateAXStatus(.notGranted) }
-                } catch {
-                    // ignore
-                }
-                return nil
-            }
-
-            focusedElement = getFocusedElementAndRecordStatus(xcode.appElement)
+            focusedElement = xcode.getFocusedElement(shouldRecordStatus: true)
+            
             if let editorElement = focusedElement, editorElement.isSourceEditor {
                 focusedEditor = .init(
                     runningApplication: xcode.runningApplication,
@@ -316,6 +307,7 @@ public final class XcodeInspector: ObservableObject {
             } else {
                 focusedEditor = nil
             }
+
         }
 
         setFocusedElement()
@@ -360,7 +352,10 @@ public final class XcodeInspector: ObservableObject {
         }.store(in: &activeXcodeCancellable)
 
         xcode.$workspaceURL.sink { [weak self] url in
-            Task { @XcodeInspectorActor in self?.activeWorkspaceURL = url }
+            Task { @XcodeInspectorActor in
+                self?.activeWorkspaceURL = url
+                self?.storeLatestNonRootWorkspaceURL(url)
+            }
         }.store(in: &activeXcodeCancellable)
 
         xcode.$projectRootURL.sink { [weak self] url in
@@ -415,5 +410,12 @@ public final class XcodeInspector: ObservableObject {
             activeXcode.observeAXNotifications()
         }
     }
-}
 
+    @XcodeInspectorActor
+    private func storeLatestNonRootWorkspaceURL(_ newWorkspaceURL: URL?) {
+        if let url = newWorkspaceURL, url.path != "/" {
+            self.latestNonRootWorkspaceURL = url
+        }
+        // If newWorkspaceURL is nil or its path is "/", latestNonRootWorkspaceURL remains unchanged.
+    }
+}

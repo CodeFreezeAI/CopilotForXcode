@@ -40,6 +40,13 @@ public struct ConversationItem: Codable, Equatable {
     }
 }
 
+public struct ConversationPreviewItem: Codable, Equatable {
+    public let id: String
+    public let title: String?
+    public let isSelected: Bool
+    public let updatedAt: Date
+}
+
 public enum DeleteType {
     case conversation(id: String)
     case turn(id: String)
@@ -62,5 +69,5 @@ public struct OperationRequest {
 }
 
 public enum ConversationFetchType {
-    case all, selected
+    case all, selected, latest, id(String)
 }

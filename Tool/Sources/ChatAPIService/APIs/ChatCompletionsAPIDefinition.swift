@@ -5,14 +5,11 @@ import Preferences
 struct ChatCompletionsRequestBody: Codable, Equatable {
     struct Message: Codable, Equatable {
         enum Role: String, Codable, Equatable {
-            case system
             case user
             case assistant
             
             var asChatMessageRole: ChatMessage.Role {
                 switch self {
-                case .system:
-                    return .system
                 case .user:
                     return .user
                 case .assistant:

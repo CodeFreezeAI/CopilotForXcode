@@ -12,9 +12,10 @@ extension ChatMessage {
         var references: [ConversationReference]
         var followUp: ConversationFollowUp?
         var suggestedTitle: String?
-        var errorMessage: String?
+        var errorMessages: [String] = []
         var steps: [ConversationProgressStep]
         var editAgentRounds: [AgentRound]
+        var panelMessages: [CopilotShowMessageParams]
 
         // Custom decoder to provide default value for steps
         init(from decoder: Decoder) throws {
@@ -24,21 +25,33 @@ extension ChatMessage {
             references = try container.decode([ConversationReference].self, forKey: .references)
             followUp = try container.decodeIfPresent(ConversationFollowUp.self, forKey: .followUp)
             suggestedTitle = try container.decodeIfPresent(String.self, forKey: .suggestedTitle)
-            errorMessage = try container.decodeIfPresent(String.self, forKey: .errorMessage)
+            errorMessages = try container.decodeIfPresent([String].self, forKey: .errorMessages) ?? []
             steps = try container.decodeIfPresent([ConversationProgressStep].self, forKey: .steps) ?? []
             editAgentRounds = try container.decodeIfPresent([AgentRound].self, forKey: .editAgentRounds) ?? []
+            panelMessages = try container.decodeIfPresent([CopilotShowMessageParams].self, forKey: .panelMessages) ?? []
         }
 
         // Default memberwise init for encoding
-        init(content: String, rating: ConversationRating, references: [ConversationReference], followUp: ConversationFollowUp?, suggestedTitle: String?, errorMessage: String?, steps: [ConversationProgressStep]?, editAgentRounds: [AgentRound]? = nil) {
+        init(
+            content: String,
+            rating: ConversationRating,
+            references: [ConversationReference],
+            followUp: ConversationFollowUp?,
+            suggestedTitle: String?,
+            errorMessages: [String] = [],
+            steps: [ConversationProgressStep]?,
+            editAgentRounds: [AgentRound]? = nil,
+            panelMessages: [CopilotShowMessageParams]? = nil
+        ) {
             self.content = content
             self.rating = rating
             self.references = references
             self.followUp = followUp
             self.suggestedTitle = suggestedTitle
-            self.errorMessage = errorMessage
+            self.errorMessages = errorMessages
             self.steps = steps ?? []
             self.editAgentRounds = editAgentRounds ?? []
+            self.panelMessages = panelMessages ?? []
         }
     }
     
@@ -49,9 +62,10 @@ extension ChatMessage {
             references: self.references,
             followUp: self.followUp,
             suggestedTitle: self.suggestedTitle,
-            errorMessage: self.errorMessage,
+            errorMessages: self.errorMessages,
             steps: self.steps,
-            editAgentRounds: self.editAgentRounds
+            editAgentRounds: self.editAgentRounds,
+            panelMessages: self.panelMessages
         )
         
         // TODO: handle exception
@@ -79,10 +93,11 @@ extension ChatMessage {
                     references: turnItemData.references,
                     followUp: turnItemData.followUp,
                     suggestedTitle: turnItemData.suggestedTitle,
-                    errorMessage: turnItemData.errorMessage,
+                    errorMessages: turnItemData.errorMessages,
                     rating: turnItemData.rating,
                     steps: turnItemData.steps,
                     editAgentRounds: turnItemData.editAgentRounds,
+                    panelMessages: turnItemData.panelMessages,
                     createdAt: turnItem.createdAt,
                     updatedAt: turnItem.updatedAt
                 )

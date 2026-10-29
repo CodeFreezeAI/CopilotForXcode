@@ -1,24 +1,29 @@
 import SwiftUI
 
 public struct CopilotMessageHeader: View {
-    public init() {}
+    let spacing: CGFloat
+    
+    public init(spacing: CGFloat = 4) {
+        self.spacing = spacing
+    }
     
     public var body: some View {
-        HStack {
-            Image("CopilotLogo")
-                .resizable()
-                .renderingMode(.template)
-                .scaledToFill()
-                .frame(width: 12, height: 12)
-                .overlay(
-                    Circle()
-                        .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
-                        .frame(width: 24, height: 24)
-                )            
+        HStack(spacing: spacing) {
+            ZStack {
+                Circle()
+                    .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
+                    .scaledFrame(width: 24, height: 24)
+                
+                Image("CopilotLogo")
+                    .resizable()
+                    .renderingMode(.template)
+                    .scaledToFit()
+                    .scaledFrame(width: 14, height: 14)
+            }
+            
             Text("GitHub Copilot")
-                .font(.system(size: 13))
-                .fontWeight(.semibold)
-                .padding(4)
+                .scaledFont(size: 13, weight: .semibold)
+                .padding(.leading, 4)
                 
             Spacer()
         }

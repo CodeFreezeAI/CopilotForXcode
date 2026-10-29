@@ -5,6 +5,7 @@ struct AdvancedSettings: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 30) {
                 SuggestionSection()
+                ChatSection()
                 EnterpriseSection()
                 ProxySection()
                 LoggingSection()

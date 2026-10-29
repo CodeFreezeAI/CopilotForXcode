@@ -6,6 +6,7 @@ public class StatusObserver: ObservableObject {
     @Published public private(set) var authStatus = AuthStatus(status: .unknown, username: nil, message: nil)
     @Published public private(set) var clsStatus = CLSStatus(status: .unknown, busy: false, message: "")
     @Published public private(set) var observedAXStatus = ObservedAXStatus.unknown
+    @Published public private(set) var quotaInfo: GitHubCopilotQuotaInfo? = nil
     
     public static let shared = StatusObserver()
     
@@ -14,6 +15,7 @@ public class StatusObserver: ObservableObject {
             await observeAuthStatus()
             await observeCLSStatus()
             await observeAXStatus()
+            await observeQuotaInfo()
         }
     }
     
@@ -32,12 +34,21 @@ public class StatusObserver: ObservableObject {
         setupAXStatusNotificationObserver()
     }
     
+    private func observeQuotaInfo() async {
+        await updateQuotaInfo()
+        setupQuotaInfoNotificationObserver()
+    }
+    
     private func updateAuthStatus() async {
         let authStatus = await Status.shared.getAuthStatus()
         let statusInfo = await Status.shared.getStatus()
         
+        if authStatus.status == .notLoggedIn {
+            await Status.shared.updateQuotaInfo(nil)
+        }
+        
         self.authStatus = AuthStatus(
-            status: authStatus,
+            status: authStatus.status,
             username: statusInfo.userName,
             message: nil
         )
@@ -52,6 +63,10 @@ public class StatusObserver: ObservableObject {
     
     private func updateAXStatus() async {
         self.observedAXStatus = await Status.shared.getAXStatus()
+    }
+    
+    private func updateQuotaInfo() async {
+        self.quotaInfo = await Status.shared.getQuotaInfo()
     }
     
     private func setupAuthStatusNotificationObserver() {
@@ -100,6 +115,19 @@ public class StatusObserver: ObservableObject {
             guard let self = self else { return }
             Task { @MainActor [self] in
                 await self.updateAXStatus()
+            }
+        }
+    }
+    
+    private func setupQuotaInfoNotificationObserver() {
+        NotificationCenter.default.addObserver(
+            forName: .serviceStatusDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self = self else { return }
+            Task { @MainActor [self] in
+                await self.updateQuotaInfo()
             }
         }
     }

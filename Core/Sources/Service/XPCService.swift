@@ -7,6 +7,9 @@ import Preferences
 import Status
 import XPCShared
 import HostAppActivator
+import XcodeInspector
+import GitHubCopilotViewModel
+import ConversationServiceProvider
 
 public class XPCService: NSObject, XPCServiceProtocol {
     // MARK: - Service
@@ -16,6 +19,19 @@ public class XPCService: NSObject, XPCServiceProtocol {
             Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "N/A",
             Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "N/A"
         )
+    }
+    
+    public func getXPCCLSVersion(withReply reply: @escaping (String?) -> Void) {
+        Task { @MainActor in
+            do {
+                let service = try GitHubCopilotViewModel.shared.getGitHubCopilotAuthService()
+                let version = try await service.version()
+                reply(version)
+            } catch {
+                Logger.service.error("Failed to get CLS version: \(error.localizedDescription)")
+                reply(nil)
+            }
+        }
     }
 
     public func getXPCServiceAccessibilityPermission(withReply reply: @escaping (ObservedAXStatus) -> Void) {
@@ -238,6 +254,322 @@ public class XPCService: NSObject, XPCServiceProtocol {
             requestBody: requestBody,
             reply: reply
         )
+    }
+
+    // MARK: - XcodeInspector
+
+    public func getXcodeInspectorData(withReply reply: @escaping (Data?, Error?) -> Void) {
+        do {
+            // Capture current XcodeInspector data
+            let inspectorData = XcodeInspectorData(
+                activeWorkspaceURL: XcodeInspector.shared.activeWorkspaceURL?.absoluteString,
+                activeProjectRootURL: XcodeInspector.shared.activeProjectRootURL?.absoluteString,
+                realtimeActiveWorkspaceURL: XcodeInspector.shared.realtimeActiveWorkspaceURL?.absoluteString,
+                realtimeActiveProjectURL: XcodeInspector.shared.realtimeActiveProjectURL?.absoluteString,
+                latestNonRootWorkspaceURL: XcodeInspector.shared.latestNonRootWorkspaceURL?.absoluteString
+            )
+            
+            // Encode and send the data
+            let data = try JSONEncoder().encode(inspectorData)
+            reply(data, nil)
+        } catch {
+            Logger.service.error("Failed to encode XcodeInspector data: \(error.localizedDescription)")
+            reply(nil, error)
+        }
+    }
+    
+    // MARK: - MCP Server Tools
+    public func getAvailableMCPServerToolsCollections(withReply reply: @escaping (Data?) -> Void) {
+        let availableMCPServerTools = CopilotMCPToolManager.getAvailableMCPServerToolsCollections()
+        if let availableMCPServerTools = availableMCPServerTools {
+            // Encode and send the data
+            let data = try? JSONEncoder().encode(availableMCPServerTools)
+            reply(data)
+        } else {
+            reply(nil)
+        }
+    }
+
+    public func updateMCPServerToolsStatus(tools: Data) {
+        // Decode the data
+        let decoder = JSONDecoder()
+        var collections: [UpdateMCPToolsStatusServerCollection] = []
+        do {
+            collections = try decoder.decode([UpdateMCPToolsStatusServerCollection].self, from: tools)
+            if collections.isEmpty {
+                return
+            }
+        } catch {
+            Logger.service.error("Failed to decode MCP server collections: \(error)")
+            return
+        }
+
+        Task { @MainActor in
+            await GitHubCopilotService.updateAllClsMCP(collections: collections)
+        }
+    }
+    
+    // MARK: - MCP Registry
+    
+    public func listMCPRegistryServers(_ params: Data, withReply reply: @escaping (Data?, Error?) -> Void) {
+        let decoder = JSONDecoder()
+        var listMCPRegistryServersParams: MCPRegistryListServersParams?
+        do {
+            listMCPRegistryServersParams = try decoder.decode(MCPRegistryListServersParams.self, from: params)
+        } catch {
+            Logger.service.error("Failed to decode MCP Registry list servers parameters: \(error)")
+            return
+        }
+        
+        Task { @MainActor in
+            do {
+                let service = try GitHubCopilotViewModel.shared.getGitHubCopilotAuthService()
+                let response = try await service.listMCPRegistryServers(listMCPRegistryServersParams!)
+                let data = try? JSONEncoder().encode(response)
+                reply(data, nil)
+            } catch {
+                Logger.service.error("Failed to list MCP Registry servers: \(error)")
+                reply(nil, error)
+            }
+        }
+    }
+    
+    public func getMCPRegistryServer(_ params: Data, withReply reply: @escaping (Data?, Error?) -> Void) {
+        let decoder = JSONDecoder()
+        var getMCPRegistryServerParams: MCPRegistryGetServerParams?
+        do {
+            getMCPRegistryServerParams = try decoder.decode(MCPRegistryGetServerParams.self, from: params)
+        } catch {
+            Logger.service.error("Failed to decode MCP Registry get server parameters: \(error)")
+            return
+        }
+        
+        Task { @MainActor in
+            do {
+                let service = try GitHubCopilotViewModel.shared.getGitHubCopilotAuthService()
+                let response = try await service.getMCPRegistryServer(getMCPRegistryServerParams!)
+                let data = try? JSONEncoder().encode(response)
+                reply(data, nil)
+            } catch {
+                Logger.service.error("Failed to get MCP Registry servers: \(error)")
+                reply(nil, error)
+            }
+        }
+    }
+
+    // MARK: - Language Model Tools
+    public func getAvailableLanguageModelTools(withReply reply: @escaping (Data?) -> Void) {
+        let availableLanguageModelTools = CopilotLanguageModelToolManager.getAvailableLanguageModelTools()
+        if let availableLanguageModelTools = availableLanguageModelTools {
+            // Encode and send the data
+            let data = try? JSONEncoder().encode(availableLanguageModelTools)
+            reply(data)
+        } else {
+            reply(nil)
+        }
+    }
+    
+    public func updateToolsStatus(tools: Data, withReply reply: @escaping (Data?) -> Void) {
+        // Decode the data
+        let decoder = JSONDecoder()
+        var toolStatusUpdates: [ToolStatusUpdate] = []
+        do {
+            toolStatusUpdates = try decoder.decode([ToolStatusUpdate].self, from: tools)
+            if toolStatusUpdates.isEmpty {
+                let emptyData = try JSONEncoder().encode([LanguageModelTool]())
+                reply(emptyData)
+                return
+            }
+        } catch {
+            Logger.service.error("Failed to decode built-in tools: \(error)")
+            reply(nil)
+            return
+        }
+
+        Task { @MainActor in
+            let updatedTools = await GitHubCopilotService.updateAllCLSTools(tools: toolStatusUpdates)
+            
+            // Encode and return the updated tools
+            do {
+                let data = try JSONEncoder().encode(updatedTools)
+                reply(data)
+            } catch {
+                Logger.service.error("Failed to encode updated tools: \(error)")
+                reply(nil)
+            }
+        }
+    }
+    
+    // MARK: - FeatureFlags
+    public func getCopilotFeatureFlags(
+        withReply reply: @escaping (Data?) -> Void
+    ) {
+        let featureFlags = FeatureFlagNotifierImpl.shared.featureFlags
+        let data = try? JSONEncoder().encode(featureFlags)
+        reply(data)
+    }
+    
+    // MARK: - Auth
+    public func signOutAllGitHubCopilotService() {
+        Task { @MainActor in
+            do {
+                try await GitHubCopilotService.signOutAll()
+            } catch {
+                Logger.service.error("Failed to sign out all: \(error)")
+            }
+        }
+    }
+    
+    public func getXPCServiceAuthStatus(withReply reply: @escaping (Data?) -> Void) {
+        Task { @MainActor in
+            let service = try GitHubCopilotViewModel.shared.getGitHubCopilotAuthService()
+            _ = try await service.checkStatus()
+            let authStatus = await Status.shared.getAuthStatus()
+            let data = try? JSONEncoder().encode(authStatus)
+            reply(data)
+        }
+    }
+    
+    // MARK: - BYOK
+    public func saveBYOKApiKey(_ params: Data, withReply reply: @escaping (Data?) -> Void) {
+        let decoder = JSONDecoder()
+        var saveApiKeyParams: BYOKSaveApiKeyParams? = nil
+        do {
+            saveApiKeyParams = try decoder.decode(BYOKSaveApiKeyParams.self, from: params)
+            if saveApiKeyParams == nil {
+                return
+            }
+        } catch {
+            Logger.service.error("Failed to save BYOK API Key: \(error)")
+            return
+        }
+        
+        Task { @MainActor in
+            let service = try GitHubCopilotViewModel.shared.getGitHubCopilotAuthService()
+            let response = try await service.saveBYOKApiKey(saveApiKeyParams!)
+            let data = try? JSONEncoder().encode(response)
+            reply(data)
+        }
+    }
+    
+    public func listBYOKApiKeys(_ params: Data, withReply reply: @escaping (Data?) -> Void) {
+        let decoder = JSONDecoder()
+        var listApiKeysParams: BYOKListApiKeysParams? = nil
+        do {
+            listApiKeysParams = try decoder.decode(BYOKListApiKeysParams.self, from: params)
+            if listApiKeysParams == nil {
+                return
+            }
+        } catch {
+            Logger.service.error("Failed to list BYOK API keys: \(error)")
+            return
+        }
+        
+        Task { @MainActor in
+            let service = try GitHubCopilotViewModel.shared.getGitHubCopilotAuthService()
+            let response = try await service.listBYOKApiKeys(listApiKeysParams!)
+            if !response.apiKeys.isEmpty {
+                BYOKModelManager.updateApiKeys(apiKeys: response.apiKeys)
+            }
+            let data = try? JSONEncoder().encode(response)
+            reply(data)
+        }
+    }
+    
+    public func deleteBYOKApiKey(_ params: Data, withReply reply: @escaping (Data?) -> Void) {
+        let decoder = JSONDecoder()
+        var deleteApiKeyParams: BYOKDeleteApiKeyParams? = nil
+        do {
+            deleteApiKeyParams = try decoder.decode(BYOKDeleteApiKeyParams.self, from: params)
+            if deleteApiKeyParams == nil {
+                return
+            }
+        } catch {
+            Logger.service.error("Failed to delete BYOK API Key: \(error)")
+            return
+        }
+        
+        Task { @MainActor in
+            let service = try GitHubCopilotViewModel.shared.getGitHubCopilotAuthService()
+            let response = try await service.deleteBYOKApiKey(deleteApiKeyParams!)
+            let data = try? JSONEncoder().encode(response)
+            reply(data)
+        }
+    }
+    
+    public func saveBYOKModel(_ params: Data, withReply reply: @escaping (Data?) -> Void) {
+        let decoder = JSONDecoder()
+        var saveModelParams: BYOKSaveModelParams? = nil
+        do {
+            saveModelParams = try decoder.decode(BYOKSaveModelParams.self, from: params)
+            if saveModelParams == nil {
+                return
+            }
+        } catch {
+            Logger.service.error("Failed to save BYOK model: \(error)")
+            return
+        }
+        
+        Task { @MainActor in
+            let service = try GitHubCopilotViewModel.shared.getGitHubCopilotAuthService()
+            let response = try await service.saveBYOKModel(saveModelParams!)
+            let data = try? JSONEncoder().encode(response)
+            reply(data)
+        }
+    }
+    
+    public func listBYOKModels(_ params: Data, withReply reply: @escaping (Data?, Error?) -> Void) {
+        let decoder = JSONDecoder()
+        var listModelsParams: BYOKListModelsParams? = nil
+        do {
+            listModelsParams = try decoder.decode(BYOKListModelsParams.self, from: params)
+            if listModelsParams == nil {
+                return
+            }
+        } catch {
+            Logger.service.error("Failed to list BYOK models: \(error)")
+            return
+        }
+        
+        Task { @MainActor in
+            do {
+                let service = try GitHubCopilotViewModel.shared.getGitHubCopilotAuthService()
+                let response = try await service.listBYOKModels(listModelsParams!)
+                if !response.models.isEmpty && listModelsParams?.enableFetchUrl == true {
+                    for model in response.models {
+                        _ = try await service.saveBYOKModel(model)
+                    }
+                }
+                let fullModelResponse = try await service.listBYOKModels(BYOKListModelsParams())
+                BYOKModelManager.updateBYOKModels(BYOKModels: fullModelResponse.models)
+                let data = try? JSONEncoder().encode(response)
+                reply(data, nil)
+            } catch {
+                Logger.service.error("Failed to list BYOK models: \(error)")
+                reply(nil, NSError.from(error))
+            }
+        }
+    }
+    
+    public func deleteBYOKModel(_ params: Data, withReply reply: @escaping (Data?) -> Void) {
+        let decoder = JSONDecoder()
+        var deleteModelParams: BYOKDeleteModelParams? = nil
+        do {
+            deleteModelParams = try decoder.decode(BYOKDeleteModelParams.self, from: params)
+            if deleteModelParams == nil {
+                return
+            }
+        } catch {
+            Logger.service.error("Failed to delete BYOK model: \(error)")
+            return
+        }
+        
+        Task { @MainActor in
+            let service = try GitHubCopilotViewModel.shared.getGitHubCopilotAuthService()
+            let response = try await service.deleteBYOKModel(deleteModelParams!)
+            let data = try? JSONEncoder().encode(response)
+            reply(data)
+        }
     }
 }
 

@@ -1,4 +1,5 @@
 import SwiftUI
+import SharedUIComponents
 
 struct ErrorPanel: View {
     var description: String
@@ -16,6 +17,7 @@ struct ErrorPanel: View {
             // close button
             Button(action: onCloseButtonTap) {
                 Image(systemName: "xmark")
+                    .scaledFont(.body)
                     .padding([.leading, .bottom], 16)
                     .padding([.top, .trailing], 8)
                     .foregroundColor(.white)

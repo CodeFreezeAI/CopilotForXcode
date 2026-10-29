@@ -1,6 +1,6 @@
 import Foundation
 
-protocol FSEventProvider {
+public protocol FSEventProvider {
     func createEventStream(
         paths: CFArray,
         latency: CFTimeInterval,

@@ -63,6 +63,13 @@ public actor AutoManagedChatMemory: ChatMemory {
         contextSystemPrompt = ""
         self.composeHistory = composeHistory
     }
+    
+    deinit {
+        history.removeAll()
+        onHistoryChange = {}
+        
+        retrievedContent.removeAll()
+    }
 
     public func mutateHistory(_ update: (inout [ChatMessage]) -> Void) {
         update(&history)

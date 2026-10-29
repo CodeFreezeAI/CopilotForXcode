@@ -35,3 +35,14 @@ extension Array where Element == ChatTabInfo {
         return self.map { $0.toConversationItem() }
     }
 }
+
+extension ChatTabPreviewInfo {
+    static func from(_ conversationPreviewItem: ConversationPreviewItem) -> ChatTabPreviewInfo {
+        return .init(
+            id: conversationPreviewItem.id,
+            title: conversationPreviewItem.title,
+            isSelected: conversationPreviewItem.isSelected,
+            updatedAt: conversationPreviewItem.updatedAt
+        )
+    }
+}

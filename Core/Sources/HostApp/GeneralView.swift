@@ -7,24 +7,25 @@ struct GeneralView: View {
     @StateObject private var viewModel = GitHubCopilotViewModel.shared
   
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
-                generalView.padding(20)
-                Divider()
-                rightsView.padding(20)
+        WithPerceptionTracking {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    generalView.padding(20)
+                    Divider()
+                    rightsView.padding(20)
+                }
+                .frame(maxWidth: .infinity)
             }
-            .frame(maxWidth: .infinity)
-        }
-        .task {
-            if isPreview { return }
-            viewModel.checkStatus()
-            await store.send(.appear).finish()
+            .task {
+                if isPreview { return }
+                await store.send(.appear).finish()
+            }
         }
     }
 
     private var generalView: some View {
         VStack(alignment: .leading, spacing: 30) {
-            AppInfoView(viewModel: viewModel, store: store)
+            AppInfoView(store: store)
             GeneralSettingsView(store: store)
             CopilotConnectionView(viewModel: viewModel, store: store)
         }

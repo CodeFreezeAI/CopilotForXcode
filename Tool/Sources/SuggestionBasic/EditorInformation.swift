@@ -1,14 +1,20 @@
 import Foundation
 import Parsing
+import AppKit
+import AXExtension
 
 public struct EditorInformation {
-    public struct LineAnnotation {
+    public struct LineAnnotation: Equatable, Hashable {
         public var type: String
-        public var line: Int
+        public var line: Int // 1-Based
         public var message: String
+        public var originalAnnotation: String
+        public var rect: CGRect? = nil
+        
+        public var isError: Bool { type == "Error" }
     }
 
-    public struct SourceEditorContent {
+    public struct SourceEditorContent: Equatable {
         /// The content of the source editor.
         public var content: String
         /// The content of the source editor in lines. Every line should ends with `\n`.
@@ -44,14 +50,18 @@ public struct EditorInformation {
             selections: [CursorRange],
             cursorPosition: CursorPosition,
             cursorOffset: Int,
-            lineAnnotations: [String]
+            lineAnnotationElements: [AXUIElement]
         ) {
             self.content = content
             self.lines = lines
             self.selections = selections
             self.cursorPosition = cursorPosition
             self.cursorOffset = cursorOffset
-            self.lineAnnotations = lineAnnotations.map(EditorInformation.parseLineAnnotation)
+            self.lineAnnotations = lineAnnotationElements.map {
+                var parsedLineAnnotation = EditorInformation.parseLineAnnotation($0.description)
+                parsedLineAnnotation.rect = $0.rect
+                return parsedLineAnnotation
+            }
         }
     }
 
@@ -153,14 +163,15 @@ public struct EditorInformation {
             return LineAnnotation(
                 type: type.trimmingCharacters(in: .whitespacesAndNewlines),
                 line: line,
-                message: message.trimmingCharacters(in: .whitespacesAndNewlines)
+                message: message.trimmingCharacters(in: .whitespacesAndNewlines),
+                originalAnnotation: annotation
             )
         }
 
         do {
             return try lineAnnotationParser.parse(annotation[...])
         } catch {
-            return .init(type: "", line: 0, message: annotation)
+            return .init(type: "", line: 0, message: annotation, originalAnnotation: annotation)
         }
     }
 }

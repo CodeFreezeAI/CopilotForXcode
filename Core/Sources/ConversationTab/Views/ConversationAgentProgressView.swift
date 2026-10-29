@@ -1,10 +1,10 @@
-
 import SwiftUI
 import ConversationServiceProvider
 import ComposableArchitecture
 import Combine
 import ChatTab
 import ChatService
+import SharedUIComponents
 
 struct ProgressAgentRound: View {
     let rounds: [AgentRound]
@@ -67,11 +67,13 @@ struct ToolConfirmationView: View {
                     Button("Cancel") {
                         chat.send(.toolCallCancelled(tool.id))
                     }
+                    .scaledFont(.body)
 
                     Button("Continue") {
                         chat.send(.toolCallAccepted(tool.id))
                     }
                     .buttonStyle(BorderedProminentButtonStyle())
+                    .scaledFont(.body)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.top, 4)
@@ -97,12 +99,12 @@ struct GenericToolTitleView: View {
         HStack(spacing: 4) {
             Text(toolStatus)
                 .textSelection(.enabled)
-                .font(.system(size: chatFontSize, weight: fontWeight))
+                .scaledFont(size: chatFontSize, weight: fontWeight)
                 .foregroundStyle(.primary)
                 .background(Color.clear)
             Text(toolName)
                 .textSelection(.enabled)
-                .font(.system(size: chatFontSize, weight: fontWeight))
+                .scaledFont(size: chatFontSize, weight: fontWeight)
                 .foregroundStyle(.primary)
                 .padding(.vertical, 2)
                 .padding(.horizontal, 4)
@@ -130,16 +132,19 @@ struct ToolStatusItemView: View {
             case .running:
                 ProgressView()
                     .controlSize(.small)
-                    .scaleEffect(0.7)
+                    .scaledScaleEffect(0.7)
             case .completed:
                 Image(systemName: "checkmark")
                     .foregroundColor(.green.opacity(0.5))
+                    .scaledFont(.body)
             case .error:
                 Image(systemName: "xmark.circle")
                     .foregroundColor(.red.opacity(0.5))
+                    .scaledFont(.body)
             case .cancelled:
                 Image(systemName: "slash.circle")
                     .foregroundColor(.gray.opacity(0.5))
+                    .scaledFont(.body)
             case .waitForConfirmation:
                 EmptyView()
             case .accepted:
@@ -185,10 +190,10 @@ struct ToolStatusItemView: View {
         WithPerceptionTracking {
             HStack(spacing: 4) {
                 statusIcon
-                    .frame(width: 16, height: 16)
+                    .scaledFrame(width: 16, height: 16)
 
                 progressTitleText
-                    .font(.system(size: chatFontSize))
+                    .scaledFont(size: chatFontSize)
                     .lineLimit(1)
                 
                 Spacer()

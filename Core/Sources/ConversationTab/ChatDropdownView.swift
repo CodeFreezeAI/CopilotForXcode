@@ -11,7 +11,7 @@ protocol DropDownItem: Equatable {
 
 extension ChatTemplate: DropDownItem {
     var displayName: String { id }
-    var displayDescription: String { shortDescription }
+    var displayDescription: String { description }
 }
 
 extension ChatAgent: DropDownItem {

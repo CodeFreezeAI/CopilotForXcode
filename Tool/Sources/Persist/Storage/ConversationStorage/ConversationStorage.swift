@@ -167,10 +167,18 @@ public final class ConversationStorage: ConversationStorageProtocol {
             
             switch type {
             case .all:
-                query = query.order(column.updatedAt.asc)
+                query = query.order(column.updatedAt.desc)
             case .selected:
                 query = query
                     .filter(column.isSelected == true)
+                    .limit(1)
+            case .latest:
+                query = query
+                    .order(column.updatedAt.desc)
+                    .limit(1)
+            case .id(let id):
+                query = query
+                    .filter(conversationTable.column.id == id)
                     .limit(1)
             }
             
@@ -183,6 +191,30 @@ public final class ConversationStorage: ConversationStorageProtocol {
                     CLSConversationID: row[column.CLSConversationID],
                     data: row[column.data].toString(),
                     createdAt: row[column.createdAt].toDate(),
+                    updatedAt: row[column.updatedAt].toDate()
+                )
+            }
+        }
+        
+        return items
+    }
+    
+    public func fetchConversationPreviewItems() throws -> [ConversationPreviewItem] {
+        var items: [ConversationPreviewItem] = []
+        
+        try withDB { db in
+            let table = conversationTable.table
+            let column = conversationTable.column
+            let query = table
+                .select(column.id, column.title, column.isSelected, column.updatedAt)
+                .order(column.updatedAt.desc)
+            
+            let rowIterator = try db.prepareRowIterator(query)
+            items = try rowIterator.map { row in
+                ConversationPreviewItem(
+                    id: row[column.id],
+                    title: row[column.title],
+                    isSelected: row[column.isSelected],
                     updatedAt: row[column.updatedAt].toDate()
                 )
             }

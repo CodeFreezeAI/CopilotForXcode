@@ -2,6 +2,7 @@ import ComposableArchitecture
 import Dependencies
 import Foundation
 import SwiftUI
+import AppKitExtension
 
 public enum ToastLevel {
     case info
@@ -295,23 +296,8 @@ public extension NSWorkspace {
     
     static func restartXcode() {
         // Find current Xcode path before quitting
-        var xcodeURL: URL?
-        
-        // Get currently running Xcode application URL
-        if let xcodeApp = NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier == "com.apple.dt.Xcode" }) {
-            xcodeURL = xcodeApp.bundleURL
-        }
-        
-        // Fallback to standard path if we couldn't get the running instance
-        if xcodeURL == nil {
-            let standardPath = "/Applications/Xcode.app"
-            if FileManager.default.fileExists(atPath: standardPath) {
-                xcodeURL = URL(fileURLWithPath: standardPath)
-            }
-        }
-
         // Restart if we found a valid path
-        if let xcodeURL = xcodeURL {
+        if let xcodeURL = getXcodeBundleURL() {
             // Quit Xcode
             let script = NSAppleScript(source: "tell application \"Xcode\" to quit")
             script?.executeAndReturnError(nil)

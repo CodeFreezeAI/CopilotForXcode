@@ -8,6 +8,9 @@ import Foundation
 import ChatAPIService
 import Preferences
 import SwiftUI
+import AppKit
+import Workspace
+import ConversationServiceProvider
 
 /// A chat tab that provides a context aware chat bot, powered by Chat.
 public class ConversationTab: ChatTab {
@@ -114,7 +117,7 @@ public class ConversationTab: ChatTab {
     
         let service = ChatService.service(for: info)
         self.service = service
-        chat = .init(initialState: .init(), reducer: { Chat(service: service) })
+        chat = .init(initialState: .init(workspaceURL: service.getWorkspaceURL()), reducer: { Chat(service: service) })
         super.init(store: store)
         
         // Start to observe changes of Chat Message
@@ -128,8 +131,25 @@ public class ConversationTab: ChatTab {
     @MainActor
     public init(service: ChatService, store: StoreOf<ChatTabItem>, with chatTabInfo: ChatTabInfo) {
         self.service = service
-        chat = .init(initialState: .init(), reducer: { Chat(service: service) })
+        chat = .init(initialState: .init(workspaceURL: service.getWorkspaceURL()), reducer: { Chat(service: service) })
         super.init(store: store)
+    }
+    
+    deinit {
+        // Cancel all Combine subscriptions
+        cancellable.forEach { $0.cancel() }
+        cancellable.removeAll()
+        
+        // Stop the debounce runner
+        Task { @MainActor [weak self] in
+            await self?.updateContentDebounce.cancel()
+        }
+        
+        // Clear observer
+        observer = NSObject()
+        
+        // The deallocation of ChatService will be called automatically
+        // The TCA Store (chat) handles its own cleanup automatically
     }
     
     @MainActor
@@ -223,6 +243,45 @@ public class ConversationTab: ChatTab {
                 }
             }
         }
+    }
+    
+    public func handlePasteEvent() -> Bool {
+        let pasteboard = NSPasteboard.general
+        if let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: nil) as? [URL], !urls.isEmpty {
+            for url in urls {
+                // Check if it's a remote URL (http/https)
+                if url.scheme == "http" || url.scheme == "https" {
+                    return false
+                }
+
+                if let isValidFile = try? WorkspaceFile.isValidFile(url), isValidFile {
+                    DispatchQueue.main.async {
+                        let fileReference = ConversationFileReference(url: url, isCurrentEditor: false)
+                        self.chat.send(.addReference(.file(fileReference)))
+                    }
+                } else if let data = try? Data(contentsOf: url),
+                    ["png", "jpeg", "jpg", "bmp", "gif", "tiff", "tif", "webp"].contains(url.pathExtension.lowercased()) {
+                    DispatchQueue.main.async {
+                        self.chat.send(.addSelectedImage(ImageReference(data: data, fileUrl: url)))
+                    }
+                }
+            }
+        } else if let data = pasteboard.data(forType: .png) {
+            chat.send(.addSelectedImage(ImageReference(data: data, source: .pasted)))
+        } else if let tiffData = pasteboard.data(forType: .tiff),
+                let imageRep = NSBitmapImageRep(data: tiffData),
+                let pngData = imageRep.representation(using: .png, properties: [:]) {
+            chat.send(.addSelectedImage(ImageReference(data: pngData, source: .pasted)))
+        } else {
+            return false
+        }
+        
+        return true
+    }
+    
+    public func updateChatTabInfo(_ tabInfo: ChatTabInfo) {
+        // Sync tabInfo for service
+        service.updateChatTabInfo(tabInfo)
     }
 }
 

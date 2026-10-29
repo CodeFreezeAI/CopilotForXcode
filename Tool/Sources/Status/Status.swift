@@ -1,4 +1,5 @@
 import AppKit
+import Preferences
 import Foundation
 
 @objc public enum ExtensionPermissionStatus: Int {
@@ -7,23 +8,6 @@ import Foundation
 
 @objc public enum ObservedAXStatus: Int {
     case unknown = -1, granted = 1, notGranted = 0
-}
-
-public struct CLSStatus: Equatable {
-    public enum Status { case unknown, normal, error, warning, inactive }
-    public let status: Status
-    public let busy: Bool
-    public let message: String
-    
-    public var isInactiveStatus: Bool { status == .inactive && !message.isEmpty }
-    public var isErrorStatus: Bool { (status == .warning || status == .error) && !message.isEmpty }
-}
-
-public struct AuthStatus: Equatable {
-    public enum Status { case unknown, loggedIn, notLoggedIn, notAuthorized }
-    public let status: Status
-    public let username: String?
-    public let message: String?
 }
 
 private struct AuthStatusInfo {
@@ -48,39 +32,9 @@ public extension Notification.Name {
     static let serviceStatusDidChange = Notification.Name("com.github.CopilotForXcode.serviceStatusDidChange")
 }
 
-public struct StatusResponse {
-    public struct Icon {
-        /// Name of the icon resource
-        public let name: String
-
-        public init(name: String) {
-            self.name = name
-        }
-
-        public var nsImage: NSImage? {
-            return NSImage(named: name)
-        }
-    }
-
-    /// The icon to display in the menu bar
-    public let icon: Icon
-    /// Indicates if an operation is in progress
-    public let inProgress: Bool
-    /// Message from the CLS (Copilot Language Server) status
-    public let clsMessage: String
-    /// Additional message (for accessibility or extension status)
-    public let message: String?
-    /// Extension status
-    public let extensionStatus: ExtensionPermissionStatus
-    /// URL for system preferences or other actions
-    public let url: String?
-    /// Current authentication status
-    public let authStatus: AuthStatus.Status
-    /// GitHub username of the authenticated user
-    public let userName: String?
-}
-
 private var currentUserName: String? = nil
+private var currentUserCopilotPlan: String? = nil
+
 public final actor Status {
     public static let shared = Status()
 
@@ -88,15 +42,29 @@ public final actor Status {
     private var axStatus: ObservedAXStatus = .unknown
     private var clsStatus = CLSStatus(status: .unknown, busy: false, message: "")
     private var authStatus = AuthStatus(status: .unknown, username: nil, message: nil)
+    
+    private var currentUserQuotaInfo: GitHubCopilotQuotaInfo? = nil
 
     private let okIcon = StatusResponse.Icon(name: "MenuBarIcon")
-    private let errorIcon = StatusResponse.Icon(name: "MenuBarWarningIcon")
+    private let errorIcon = StatusResponse.Icon(name: "MenuBarErrorIcon")
+    private let warningIcon = StatusResponse.Icon(name: "MenuBarWarningIcon")
     private let inactiveIcon = StatusResponse.Icon(name: "MenuBarInactiveIcon")
 
     private init() {}
 
     public static func currentUser() -> String? {
         return currentUserName
+    }
+    
+    public func currentUserPlan() -> String? {
+        return currentUserCopilotPlan
+    }
+
+    public func updateQuotaInfo(_ quotaInfo: GitHubCopilotQuotaInfo?) {
+        guard quotaInfo != currentUserQuotaInfo else { return }
+        currentUserQuotaInfo = quotaInfo
+        currentUserCopilotPlan = quotaInfo?.copilotPlan
+        broadcast()
     }
 
     public func updateExtensionStatus(_ status: ExtensionPermissionStatus) {
@@ -120,6 +88,7 @@ public final actor Status {
 
     public func updateAuthStatus(_ status: AuthStatus.Status, username: String? = nil, message: String? = nil) {
         currentUserName = username
+        UserDefaults.shared.set(username ?? "", for: \.currentUserName)
         let newStatus = AuthStatus(status: status, username: username, message: message)
         guard newStatus != authStatus else { return }
         authStatus = newStatus
@@ -146,12 +115,16 @@ public final actor Status {
         ).isEmpty
     }
 
-    public func getAuthStatus() -> AuthStatus.Status {
-        authStatus.status
+    public func getAuthStatus() -> AuthStatus {
+        authStatus
     }
 
     public func getCLSStatus() -> CLSStatus {
         clsStatus
+    }
+    
+    public func getQuotaInfo() -> GitHubCopilotQuotaInfo? {
+        currentUserQuotaInfo
     }
 
     public func getStatus() -> StatusResponse {
@@ -169,7 +142,8 @@ public final actor Status {
             extensionStatus: extensionStatus,
             url: accessibilityStatusInfo.url,
             authStatus: authStatusInfo.authStatus,
-            userName: authStatusInfo.userName
+            userName: authStatusInfo.userName,
+            quotaInfo: currentUserQuotaInfo
         )
     }
 
@@ -199,6 +173,9 @@ public final actor Status {
     private func getCLSStatusInfo() -> CLSStatusInfo {
         if clsStatus.isInactiveStatus {
             return CLSStatusInfo(icon: inactiveIcon, message: clsStatus.message)
+        }
+        if clsStatus.isWarningStatus {
+            return CLSStatusInfo(icon: warningIcon, message: clsStatus.message)
         }
         if clsStatus.isErrorStatus {
             return CLSStatusInfo(icon: errorIcon, message: clsStatus.message)

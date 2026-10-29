@@ -1,4 +1,5 @@
 import Foundation
+import Logger
 
 public extension Notification.Name {
     static let gitHubCopilotMCPToolsDidChange = Notification
@@ -6,50 +7,45 @@ public extension Notification.Name {
 }
 
 public class CopilotMCPToolManager {
-    private static var availableMCPServerTools: [MCPServerToolsCollection] = []
-    private static var updatedMCPToolsStatusParams: UpdateMCPToolsStatusParams = .init(servers: [])
+    private static var availableMCPServerTools: [MCPServerToolsCollection]?
     
     public static func updateMCPTools(_ serverToolsCollections: [MCPServerToolsCollection]) {
         let sortedMCPServerTools = serverToolsCollections.sorted(by: { $0.name.lowercased() < $1.name.lowercased() })
         guard sortedMCPServerTools != availableMCPServerTools else { return }
         availableMCPServerTools = sortedMCPServerTools
         DispatchQueue.main.async {
-            NotificationCenter.default.post(name: .gitHubCopilotMCPToolsDidChange, object: nil)
+            Logger.client.info("Notify about MCP tools change: \(getToolsSummary())")
+            DistributedNotificationCenter.default().post(name: .gitHubCopilotMCPToolsDidChange, object: nil)
         }
     }
 
-    public static func getAvailableMCPTools() -> [MCPTool] {
+    private static func getToolsSummary() -> String {
+        var summary = ""
+        guard let tools = availableMCPServerTools else { return summary }
+        for server in tools {
+            summary += "Server: \(server.name) with \(server.tools.count) tools (\(server.tools.filter { $0._status == .enabled }.count) enabled, \(server.tools.filter { $0._status == .disabled }.count) disabled). "
+        }
+
+        return summary
+    }
+
+    public static func getAvailableMCPTools() -> [MCPTool]? {
         // Flatten all tools from all servers into a single array
-        return availableMCPServerTools.flatMap { $0.tools }
+        return availableMCPServerTools?.flatMap { $0.tools }
     }
     
-    public static func getAvailableMCPServerToolsCollections() -> [MCPServerToolsCollection] {
+    public static func getAvailableMCPServerToolsCollections() -> [MCPServerToolsCollection]? {
         return availableMCPServerTools
     }
 
     public static func hasMCPTools() -> Bool {
-        return !availableMCPServerTools.isEmpty
-    }
-    
-    public static func updateMCPToolsStatus(_ servers: [UpdateMCPToolsStatusServerCollection]) {
-        updatedMCPToolsStatusParams = .init(servers: servers)
-        DispatchQueue.main.async {
-            NotificationCenter.default
-                .post(
-                    name: .gitHubCopilotShouldUpdateMCPToolsStatus,
-                    object: nil
-                )
-        }
-    }
-    
-    public static func getUpdatedMCPToolsStatusParams() -> UpdateMCPToolsStatusParams {
-        return updatedMCPToolsStatusParams
+        return availableMCPServerTools != nil && !availableMCPServerTools!.isEmpty
     }
 
     public static func clearMCPTools() {
         availableMCPServerTools = []
         DispatchQueue.main.async {
-            NotificationCenter.default.post(name: .gitHubCopilotMCPToolsDidChange, object: nil)
+            DistributedNotificationCenter.default().post(name: .gitHubCopilotMCPToolsDidChange, object: nil)
         }
     }
 }

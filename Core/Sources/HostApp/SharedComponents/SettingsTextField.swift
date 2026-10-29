@@ -4,31 +4,47 @@ struct SettingsTextField: View {
     let title: String
     let prompt: String
     @Binding var text: String
-
-    var body: some View {
-        Form {
-            TextField(text: $text, prompt: Text(prompt)) {
-                Text(title)
-            }
-            .textFieldStyle(PlainTextFieldStyle())
-            .multilineTextAlignment(.trailing)
-        }
-        .padding(10)
+    let isSecure: Bool
+    
+    @State private var localText: String = ""
+    @State private var debounceTimer: Timer?
+    
+    var onDebouncedChange: ((String) -> Void)?
+    
+    init(title: String, prompt: String, text: Binding<String>, isSecure: Bool = false, onDebouncedChange: ((String) -> Void)? = nil) {
+        self.title = title
+        self.prompt = prompt
+        self._text = text
+        self.isSecure = isSecure
+        self.onDebouncedChange = onDebouncedChange
+        self._localText = State(initialValue: text.wrappedValue)
     }
-}
-
-struct SettingsSecureField: View {
-    let title: String
-    let prompt: String
-    @Binding var text: String
 
     var body: some View {
         Form {
-            SecureField(text: $text, prompt: Text(prompt)) {
-                Text(title)
+            Group {
+                if isSecure {
+                    SecureField(text: $localText, prompt: Text(prompt)) {
+                        Text(title)
+                    }
+                } else {
+                    TextField(text: $localText, prompt: Text(prompt)) {
+                        Text(title)
+                    }
+                }
             }
             .textFieldStyle(.plain)
             .multilineTextAlignment(.trailing)
+            .onChange(of: localText) { newValue in
+                text = newValue
+                debounceTimer?.invalidate()
+                debounceTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: false) { _ in
+                    onDebouncedChange?(newValue)
+                }
+            }
+            .onAppear {
+                localText = text
+            }
         }
         .padding(10)
     }
@@ -42,10 +58,11 @@ struct SettingsSecureField: View {
             text: .constant("")
         )
         Divider()
-        SettingsSecureField(
+        SettingsTextField(
             title: "Password",
             prompt: "pass",
-            text: .constant("")
+            text: .constant(""),
+            isSecure: true
         )
     }
     .padding(.vertical, 10)

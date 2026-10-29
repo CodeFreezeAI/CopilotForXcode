@@ -79,6 +79,7 @@ struct ChatContextMenu: View {
                     store.send(.customCommandButtonTapped(command))
                 }) {
                     Text(command.name)
+                        .scaledFont(.body)
                 }
             }
         }

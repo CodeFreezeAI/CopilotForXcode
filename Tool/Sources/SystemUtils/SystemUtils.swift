@@ -1,4 +1,5 @@
 import Foundation
+import Logger
 import IOKit
 import CryptoKit
 
@@ -171,5 +172,78 @@ public class SystemUtils {
         #else
         return false
         #endif
+    }
+    
+    /// Returns the environment of a login shell (to get correct PATH and other variables)
+    public func getLoginShellEnvironment(shellPath: String = "/bin/zsh") -> [String: String]? {
+        do {
+            guard let output = try Self.executeCommand(
+                path: shellPath, 
+                arguments: ["-i", "-l", "-c", "env"])
+            else { return nil }
+            
+            var env: [String: String] = [:]
+            for line in output.split(separator: "\n") {
+                if let idx = line.firstIndex(of: "=") {
+                    let key = String(line[..<idx])
+                    let value = String(line[line.index(after: idx)...])
+                    env[key] = value
+                }
+            }
+            return env
+        } catch {
+            Logger.client.error("Failed to get login shell environment: \(error.localizedDescription)")
+            return nil
+        }
+    }
+    
+    public static func executeCommand(
+        inDirectory directory: String = NSHomeDirectory(), 
+        path: String, 
+        arguments: [String]
+    ) throws -> String? {
+        let task = Process()
+        let pipe = Pipe()
+        
+        defer {
+            pipe.fileHandleForReading.closeFile()
+            if task.isRunning {
+                task.terminate()
+            }
+        }
+        
+        task.executableURL = URL(fileURLWithPath: path)
+        task.arguments = arguments
+        task.standardOutput = pipe
+        task.currentDirectoryURL = URL(fileURLWithPath: directory)
+        
+        try task.run()
+        task.waitUntilExit()
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        return String(data: data, encoding: .utf8)
+    }
+
+    public func appendCommonBinPaths(path: String) -> String {
+        let homeDirectory = NSHomeDirectory()
+        let commonPaths = [
+            "/usr/local/bin",
+            "/usr/bin",
+            "/bin",
+            "/usr/sbin",
+            "/sbin",
+            homeDirectory + "/.local/bin",
+            "/opt/homebrew/bin",
+            "/opt/homebrew/sbin",
+        ]
+        
+        let paths = path.split(separator: ":").map { String($0) }
+        var newPath = path
+        for commonPath in commonPaths {
+            if FileManager.default.fileExists(atPath: commonPath) && !paths.contains(commonPath) {
+                newPath += (newPath.isEmpty ? "" : ":") + commonPath
+            }
+        }
+
+        return newPath
     }
 }
