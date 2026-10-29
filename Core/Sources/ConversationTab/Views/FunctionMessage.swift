@@ -19,23 +19,49 @@ struct FunctionMessage: View {
     private var isOrgUser: Bool {
         text.contains("reach out to your organization's Copilot admin")
     }
+    
+    private var isBYOKUser: Bool {
+        text.contains("You've reached your quota limit for your BYOK model")
+    }
+
+    private var isTBBMessage: Bool {
+        text.contains("AI Credits") || text.contains("additional overages")
+    }
 
     private var switchToFallbackModelText: String {
+        guard !isTBBMessage else { return "" }
         if let fallbackModelName = CopilotModelManager.getFallbackLLM(
             scope: chat.isAgentMode ? .agentPanel : .chatPanel
         )?.modelName {
             return "We have automatically switched you to \(fallbackModelName) which is included with your plan."
-        } else {
-            return ""
         }
+        return ""
+    }
+
+    private var quotaActionButtons: [(title: String, urlString: String, isProminent: Bool)] {
+        let lower = text.lowercased()
+        let hasEnableOverage = lower.contains("enable additional overages")
+        let hasIncreaseBudget = lower.contains("increase budget")
+        let hasOverage = hasEnableOverage || hasIncreaseBudget
+        var buttons: [(String, String, Bool)] = []
+        if hasEnableOverage {
+            buttons.append(("Enable Additional Overage", "https://aka.ms/github-copilot-manage-overage", true))
+        }
+        if hasIncreaseBudget {
+            buttons.append(("Increase Budget", "https://aka.ms/github-copilot-manage-overage", true))
+        }
+        if lower.contains("upgrade your plan") {
+            buttons.append(("Upgrade Plan", "https://aka.ms/github-copilot-upgrade-plan", !hasOverage))
+        }
+        return buttons
     }
 
     private var errorContent: Text {
-        switch (isFreePlanUser, isOrgUser) {
-        case (true, _):
+        switch (isFreePlanUser, isOrgUser, isBYOKUser) {
+        case (true, _, _):
             return Text("Monthly message limit reached. Upgrade to Copilot Pro (30-day free trial) or wait for your limit to reset.")
-            
-        case (_, true):
+
+        case (_, true, _):
             let parts = [
                 "You have exceeded your free request allowance.",
                 switchToFallbackModelText,
@@ -43,12 +69,14 @@ struct FunctionMessage: View {
             ].filter { !$0.isEmpty }
             return Text(attributedString(from: parts))
 
+        case (_, _, true):
+            let sentences = splitBYOKQuotaMessage(text)
+            guard sentences.count == 2 else { fallthrough }
+            let parts = [sentences[0], switchToFallbackModelText, sentences[1]].filter { !$0.isEmpty }
+            return Text(attributedString(from: parts))
+
         default:
-            let parts = [
-                "You have exceeded your premium request allowance.",
-                switchToFallbackModelText,
-                "[Enable additional paid premium requests](https://aka.ms/github-copilot-manage-overage) to continue using premium models."
-            ].filter { !$0.isEmpty }
+            let parts = [text, switchToFallbackModelText].filter { !$0.isEmpty }
             return Text(attributedString(from: parts))
         }
     }
@@ -61,10 +89,25 @@ struct FunctionMessage: View {
         }
     }
 
+    private func splitBYOKQuotaMessage(_ message: String) -> [String] {
+        // Fast path: find the first period followed by a space + capital P (for "Please")
+        let boundary = ". Please check with"
+        if let range = message.range(of: boundary) {
+            // First sentence ends at the period just before " Please"
+            let firstSentence = String(message[..<range.lowerBound]) + "."
+            // Second sentence starts at "Please check with ..."
+            let secondSentenceStart = message.index(range.lowerBound, offsetBy: 2) // skip ". "
+            let secondSentence = String(message[secondSentenceStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            return [firstSentence, secondSentence]
+        }
+        
+        return [message]
+    }
+
     var body: some View {
         NotificationBanner(style: .warning) {
             errorContent
-            
+
             if isFreePlanUser {
                 Button("Update to Copilot Pro") {
                     if let url = URL(string: "https://aka.ms/github-copilot-upgrade-plan") {
@@ -79,6 +122,27 @@ struct FunctionMessage: View {
                         NSCursor.pointingHand.push()
                     } else {
                         NSCursor.pop()
+                    }
+                }
+            }
+
+            if !quotaActionButtons.isEmpty {
+                HStack(spacing: 8) {
+                    ForEach(quotaActionButtons, id: \.title) { button in
+                        Group {
+                            if button.isProminent {
+                                Button(button.title) {
+                                    if let url = URL(string: button.urlString) { openURL(url) }
+                                }.buttonStyle(.borderedProminent)
+                            } else {
+                                Button(button.title) {
+                                    if let url = URL(string: button.urlString) { openURL(url) }
+                                }.buttonStyle(.bordered)
+                            }
+                        }
+                        .controlSize(.regular)
+                        .scaledFont(.body)
+                        .onHover { if $0 { NSCursor.pointingHand.push() } else { NSCursor.pop() } }
                     }
                 }
             }

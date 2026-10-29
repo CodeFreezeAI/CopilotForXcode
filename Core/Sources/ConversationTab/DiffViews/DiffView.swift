@@ -5,6 +5,7 @@ import Logger
 import ConversationServiceProvider
 import ChatService
 import ChatTab
+import ChatAPIService
 
 extension FileEdit {
     var originalContentByStatus: String {

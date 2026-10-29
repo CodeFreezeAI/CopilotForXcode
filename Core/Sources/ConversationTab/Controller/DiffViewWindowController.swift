@@ -2,6 +2,7 @@ import SwiftUI
 import ChatService
 import ComposableArchitecture
 import WebKit
+import ChatAPIService
 
 enum Style {
     /// default diff view frame. Same as the `ChatPanel`

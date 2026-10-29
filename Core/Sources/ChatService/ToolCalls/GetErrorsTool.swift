@@ -8,7 +8,6 @@ public class GetErrorsTool: ICopilotTool {
     public func invokeTool(
         _ request: InvokeClientToolRequest,
         completion: @escaping (AnyJSONRPCResponse) -> Void,
-        chatHistoryUpdater: ChatHistoryUpdater?,
         contextProvider: ToolContextProvider?
     ) -> Bool {
         guard let params = request.params,
@@ -34,9 +33,11 @@ public class GetErrorsTool: ICopilotTool {
         /// As the resolving should be sync. Especially when completion the JSONRPCResponse
         let focusedElement: AXUIElement? = try? xcodeInstance.appElement.copyValue(key: kAXFocusedUIElementAttribute)
         let focusedEditor: SourceEditor?
-        if let editorElement = focusedElement, editorElement.isSourceEditor {
+        if let editorElement = focusedElement, editorElement.isNonNavigatorSourceEditor {
             focusedEditor = .init(runningApplication: xcodeInstance.runningApplication, element: editorElement)
-        } else if let element = focusedElement, let editorElement = element.firstParent(where: \.isSourceEditor) {
+        } else if let element = focusedElement, let editorElement = element.firstParent(
+            where: \.isNonNavigatorSourceEditor
+        ) {
             focusedEditor = .init(runningApplication: xcodeInstance.runningApplication, element: editorElement)
         } else {
             focusedEditor = nil

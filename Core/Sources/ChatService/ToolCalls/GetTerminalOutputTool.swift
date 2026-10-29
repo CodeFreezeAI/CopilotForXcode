@@ -4,7 +4,7 @@ import JSONRPC
 import Terminal
 
 public class GetTerminalOutputTool: ICopilotTool {
-    public func invokeTool(_ request: InvokeClientToolRequest, completion: @escaping (AnyJSONRPCResponse) -> Void, chatHistoryUpdater: ChatHistoryUpdater?, contextProvider: (any ToolContextProvider)?) -> Bool {
+    public func invokeTool(_ request: InvokeClientToolRequest, completion: @escaping (AnyJSONRPCResponse) -> Void, contextProvider: (any ToolContextProvider)?) -> Bool {
         var result: String = ""
         if let input = request.params?.input as? [String: AnyCodable], let terminalId = input["id"]?.value as? String{
             let session = TerminalSessionManager.shared.getSession(for: terminalId)

@@ -35,7 +35,7 @@ struct ChatNoWorkspaceView: View {
                     maxHeight: .infinity
                 )
             }
-            .xcodeStyleFrame(cornerRadius: 10)
+            .xcodeStyleFrame()
             .ignoresSafeArea(edges: .top)
         }
     }

@@ -14,7 +14,6 @@ public class FetchWebPageTool: ICopilotTool {
     public func invokeTool(
         _ request: InvokeClientToolRequest,
         completion: @escaping (AnyJSONRPCResponse) -> Void,
-        chatHistoryUpdater: ChatHistoryUpdater?,
         contextProvider: (any ToolContextProvider)?
     ) -> Bool {
         guard let params = request.params,

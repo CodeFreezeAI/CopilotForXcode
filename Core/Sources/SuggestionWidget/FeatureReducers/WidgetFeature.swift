@@ -111,6 +111,8 @@ public struct WidgetFeature {
         case updateColorScheme
 
         case updatePanelStateToMatch(WidgetLocation)
+        case updateNESSuggestionPanelStateToMatch(WidgetLocation)
+        case updateAgentConfigurationWidgetStateToMatch(WidgetLocation)
         case updateFocusingDocumentURL
         case setFocusingDocumentURL(to: URL?)
         case updateKeyWindow(WindowCanBecomeKey)
@@ -390,6 +392,36 @@ public struct WidgetFeature {
                     .defaultPanelLocation
                     .alignPanelTop
 
+                return .none
+                
+            case let .updateNESSuggestionPanelStateToMatch(widgetLocation):
+                
+                guard let nesSuggestionPanelLocation = widgetLocation.nesSuggestionPanelLocation else {
+                    state.panelState.nesSuggestionPanelState.isPanelDisplayed = false
+                    state.panelState.nesSuggestionPanelState.isPanelOutOfFrame = false
+                    return .none
+                }
+                
+                let lineFirstCharacterFrame = nesSuggestionPanelLocation.lineFirstCharacterFrame
+                let scrollViewFrame = nesSuggestionPanelLocation.scrollViewFrame
+                if scrollViewFrame.contains(lineFirstCharacterFrame) {
+                    state.panelState.nesSuggestionPanelState.isPanelOutOfFrame = false
+                } else {
+                    state.panelState.nesSuggestionPanelState.isPanelOutOfFrame = true
+                }
+                state.panelState.nesSuggestionPanelState.lineHeight = nesSuggestionPanelLocation.lineHeight
+                
+                return .none
+                
+            case let .updateAgentConfigurationWidgetStateToMatch(widgetLocation):
+                guard let agentConfigurationWidgetLocation = widgetLocation.agentConfigurationWidgetLocation else {
+                    state.panelState.agentConfigurationWidgetState.isPanelDisplayed = false
+                    return .none
+                }
+                
+                state.panelState.agentConfigurationWidgetState.isPanelDisplayed = true
+                state.panelState.agentConfigurationWidgetState.lineHeight = agentConfigurationWidgetLocation.lineHeight
+                
                 return .none
 
             case let .updateKeyWindow(window):

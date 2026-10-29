@@ -135,7 +135,7 @@ public struct CodeReviewPanelFeature {
                 
                 return .none
                 
-            case let .close(id):
+            case .close(_):
                 state.isPanelDisplayed = false
                 state.closedByUser = true
                 

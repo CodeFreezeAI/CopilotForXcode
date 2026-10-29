@@ -57,7 +57,7 @@ public struct Instruction: View {
                         }
                     }
                 }
-            }.frame(maxWidth: 350)
+            }.scaledFrame(maxWidth: 350)
         }
     }
 }

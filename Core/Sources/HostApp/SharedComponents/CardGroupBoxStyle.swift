@@ -1,4 +1,5 @@
 import SwiftUI
+import SharedUIComponents
 
 public struct CardGroupBoxStyle: GroupBoxStyle {
     public var backgroundColor: Color
@@ -15,7 +16,8 @@ public struct CardGroupBoxStyle: GroupBoxStyle {
             configuration.label.foregroundColor(.primary)
             configuration.content.foregroundColor(.primary)
         }
-        .padding(8)
+        .padding(.vertical, 12)
+        .padding(.horizontal, 20)
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .background(backgroundColor)
         .cornerRadius(12)

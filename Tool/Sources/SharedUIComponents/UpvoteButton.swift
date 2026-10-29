@@ -17,10 +17,10 @@ public struct UpvoteButton: View {
         }) {
             Image(systemName: isSelected ? "hand.thumbsup.fill" : "hand.thumbsup")
                 .resizable()
-                .aspectRatio(contentMode: .fit)
-                .scaledFrame(width: 14, height: 14)
+                .scaledToFit()
+                .scaledPadding(2)
+                .scaledFrame(width: 16, height: 16)
                 .foregroundColor(.secondary)
-                .padding(4)
                 .help("Helpful")
         }
         .buttonStyle(HoverButtonStyle(padding: 0))

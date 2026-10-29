@@ -1,5 +1,6 @@
 import ComposableArchitecture
 import SwiftUI
+import SharedUIComponents
 
 struct GeneralSettingsView: View {
     @AppStorage(\.extensionPermissionShown) var extensionPermissionShown: Bool
@@ -19,7 +20,7 @@ struct GeneralSettingsView: View {
             return ""
         }
     }
-    
+
     var extensionPermissionSubtitle: any View {
         switch store.isExtensionPermissionGranted {
         case .notGranted:
@@ -40,8 +41,7 @@ struct GeneralSettingsView: View {
             return Text("")
         }
     }
-    
-    
+
     var extensionPermissionBadge: BadgeItem? {
         switch store.isExtensionPermissionGranted {
         case .notGranted:
@@ -52,8 +52,8 @@ struct GeneralSettingsView: View {
             return nil
         }
     }
-    
-    var extensionPermissionAction: ()->Void {
+
+    var extensionPermissionAction: () -> Void {
         switch store.isExtensionPermissionGranted {
         case .disabled:
             return { shouldShowRestartXcodeAlert = true }
@@ -89,12 +89,9 @@ struct GeneralSettingsView: View {
         } footer: {
             HStack {
                 Spacer()
-                Button("?") {
-                    NSWorkspace.shared.open(
-                        URL(string: "https://github.com/github/CopilotForXcode/blob/main/TROUBLESHOOTING.md")!
-                    )
-                }
-                .clipShape(Circle())
+                AdaptiveHelpLink(action: { NSWorkspace.shared.open(
+                    URL(string: "https://github.com/github/CopilotForXcode/blob/main/TROUBLESHOOTING.md")!
+                )})
             }
         }
         .alert(
@@ -102,10 +99,10 @@ struct GeneralSettingsView: View {
             isPresented: $shouldPresentExtensionPermissionAlert
         ) {
             Button(
-            "Open System Preferences",
-            action: {
-                NSWorkspace.openXcodeExtensionsPreferences()
-            }).keyboardShortcut(.defaultAction)
+                "Open System Preferences",
+                action: {
+                    NSWorkspace.openXcodeExtensionsPreferences()
+                }).keyboardShortcut(.defaultAction)
             Button("View How-to Guide", action: {
                 let url = "https://github.com/github/CopilotForXcode/blob/main/TROUBLESHOOTING.md#extension-permission"
                 NSWorkspace.shared.open(URL(string: url)!)
@@ -126,7 +123,7 @@ struct GeneralSettingsView: View {
             Button("Restart Now") {
                 NSWorkspace.restartXcode()
             }.keyboardShortcut(.defaultAction)
-            
+
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Quit and restart Xcode to enable Github Copilot for Xcode extension.")

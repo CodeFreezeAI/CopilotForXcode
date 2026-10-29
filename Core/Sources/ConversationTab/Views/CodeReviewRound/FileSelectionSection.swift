@@ -46,7 +46,7 @@ private struct FileSelectionHeader: View {
     
     var body: some View {
         HStack(alignment: .top, spacing: 6) {
-            Image("Sparkle")
+            Image("codeReview")
                 .resizable()
                 .scaledToFit()
                 .scaledFrame(width: 16, height: 16)
@@ -113,6 +113,7 @@ private struct FileSelectionList: View {
                 // Select All checkbox for all files
                 selectedAllCheckbox
                     .disabled(reviewStatus != .waitForConfirmation)
+                    .scaledFrame(maxHeight: 16)
                                 
                 FileToggleList(
                     fileUris: visibleFileUris,
@@ -254,11 +255,10 @@ private struct FileSelectionRow: View {
     }
     
     var body: some View {
-        HStack {
+        HStack(alignment: .center) {
             Toggle(isOn: $isSelected) {
                 HStack(spacing: 8) {
                     drawFileIcon(fileURL)
-                        .resizable()
                         .scaledToFit()
                         .scaledFrame(width: 16, height: 16)
                     

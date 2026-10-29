@@ -1,0 +1,17 @@
+{
+  "name": "GitHub Copilot",
+  "description": "GitHub's AI pair programmer",
+  "publisher": {
+    "name": "GitHub",
+    "url": "https://github.com/github",
+    "verified": true
+  },
+  "repository": "https://github.com/github/CopilotForXcode",
+  "license": "proprietary",
+  "plugins": [
+    {
+      "path": ".agent-plugin",
+      "type": "acp-agent"
+    }
+  ]
+}

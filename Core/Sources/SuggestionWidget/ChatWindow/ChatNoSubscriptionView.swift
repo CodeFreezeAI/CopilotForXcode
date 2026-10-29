@@ -16,7 +16,7 @@ struct ChatNoSubscriptionView: View {
                         .resizable()
                         .renderingMode(.template)
                         .scaledToFill()
-                        .frame(width: 60.0, height: 60.0)
+                        .scaledFrame(width: 60.0, height: 60.0)
                         .foregroundColor(.primary)
                     
                     Text("No Copilot Subscription Found")
@@ -57,7 +57,7 @@ struct ChatNoSubscriptionView: View {
                     maxHeight: .infinity
                 )
             }
-            .xcodeStyleFrame(cornerRadius: 10)
+            .xcodeStyleFrame()
             .ignoresSafeArea(edges: .top)
         }
     }

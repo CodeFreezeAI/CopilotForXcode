@@ -67,7 +67,24 @@ public class WorkspacePool {
         if filespaces.count == 1 { return filespaces.first }
         Logger.workspacePool.info("Multiple workspaces found with file: \(fileURL)")
         // If multiple workspaces are found, return the first with a suggestion
-        return filespaces.first { $0.presentingSuggestion != nil }
+        return filespaces.first { $0.presentingSuggestion != nil } ?? filespaces.first { $0.presentingNESSuggestion != nil }
+    }
+    
+    public func fetchWorkspaceAndFilespace(fileURL: URL) -> (Workspace, Filespace)? {
+        var workspace: Workspace?
+        var filespace: Filespace?
+        
+        for wp in workspaces.values {
+            if let fp = wp.filespaces[fileURL] {
+                if fp.presentingSuggestion != nil || fp.presentingNESSuggestion != nil {
+                    return (wp, fp)
+                }
+                workspace = wp
+                filespace = fp
+            }
+        }
+        
+        return workspace.flatMap { ws in filespace.map { fs in (ws, fs) } }
     }
 
     @WorkspaceActor
@@ -93,13 +110,13 @@ public class WorkspacePool {
         if let currentWorkspaceURL = await XcodeInspector.shared.safe.realtimeActiveWorkspaceURL {
             if let existed = workspaces[currentWorkspaceURL] {
                 // Reuse the existed workspace.
-                let filespace = try existed.createFilespaceIfNeeded(fileURL: fileURL)
+                let filespace = try await existed.createFilespaceIfNeeded(fileURL: fileURL)
                 return (existed, filespace)
             }
 
             let new = createNewWorkspace(workspaceURL: currentWorkspaceURL)
             workspaces[currentWorkspaceURL] = new
-            let filespace = try new.createFilespaceIfNeeded(fileURL: fileURL)
+            let filespace = try await new.createFilespaceIfNeeded(fileURL: fileURL)
             return (new, filespace)
         }
 
@@ -133,7 +150,7 @@ public class WorkspacePool {
                 return createNewWorkspace(workspaceURL: workspaceURL)
             }()
 
-            let filespace = try workspace.createFilespaceIfNeeded(fileURL: fileURL)
+            let filespace = try await workspace.createFilespaceIfNeeded(fileURL: fileURL)
             workspaces[workspaceURL] = workspace
             workspace.refreshUpdateTime()
             return (workspace, filespace)

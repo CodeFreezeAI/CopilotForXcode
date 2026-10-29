@@ -1,61 +1,38 @@
 import SwiftUI
 import Foundation
-
-// MARK: - QuotaSnapshot Model
-public struct QuotaSnapshot {
-    public var percentRemaining: Float
-    public var unlimited: Bool
-    public var overagePermitted: Bool
-    
-    public init(percentRemaining: Float, unlimited: Bool, overagePermitted: Bool) {
-        self.percentRemaining = percentRemaining
-        self.unlimited = unlimited
-        self.overagePermitted = overagePermitted
-    }
-}
+import Status
 
 // MARK: - QuotaView Main Class
 public class QuotaView: NSView {
-    
+
     // MARK: - Properties
-    private let chat: QuotaSnapshot
-    private let completions: QuotaSnapshot
-    private let premiumInteractions: QuotaSnapshot
-    private let resetDate: String
-    private let copilotPlan: String
-    
-    private var isFreeUser: Bool {
-        return copilotPlan == "free"
-    }
-    
-    private var isOrgUser: Bool {
-        return copilotPlan == "business" || copilotPlan == "enterprise"
-    }
-    
+    private let quotaInfo: GitHubCopilotQuotaInfo
+
+    private var isFreeUser: Bool { quotaInfo.isFreeUser }
+    private var isCBCE: Bool { quotaInfo.isCBCE }
+    private var isCBCEUnlimited: Bool { quotaInfo.isCBCEUnlimited }
+    private var tokenBasedBillingEnabled: Bool { quotaInfo.isTokenBasedBilling }
+    private var isPaidIndividualUser: Bool { quotaInfo.isPaidIndividual }
+    private var canUpgradePlan: Bool { quotaInfo.isUpgradePlanAllowed }
+
     private var isFreeQuotaUsedUp: Bool {
-        return chat.percentRemaining == 0 && completions.percentRemaining == 0
+        let chatRemaining = quotaInfo.chat.percentRemaining ?? (100.0 - (quotaInfo.chat.usedPercentage ?? 0))
+        let completionsRemaining = quotaInfo.completions.percentRemaining ?? (100.0 - (quotaInfo.completions.usedPercentage ?? 0))
+        return chatRemaining == 0 && completionsRemaining == 0
     }
-    
+
     private var isFreeQuotaRemaining: Bool {
-        return chat.percentRemaining > 25 && completions.percentRemaining > 25
+        let chatRemaining = quotaInfo.chat.percentRemaining ?? (100.0 - (quotaInfo.chat.usedPercentage ?? 0))
+        let completionsRemaining = quotaInfo.completions.percentRemaining ?? (100.0 - (quotaInfo.completions.usedPercentage ?? 0))
+        return chatRemaining > 25 && completionsRemaining > 25
     }
-    
+
     // MARK: - Initialization
-    public init(
-        chat: QuotaSnapshot,
-        completions: QuotaSnapshot,
-        premiumInteractions: QuotaSnapshot,
-        resetDate: String,
-        copilotPlan: String
-    ) {
-        self.chat = chat
-        self.completions = completions
-        self.premiumInteractions = premiumInteractions
-        self.resetDate = resetDate
-        self.copilotPlan = copilotPlan
-        
+    public init(quotaInfo: GitHubCopilotQuotaInfo) {
+        self.quotaInfo = quotaInfo
+
         super.init(frame: NSRect(x: 0, y: 0, width: Layout.viewWidth, height: 0))
-        
+
         configureView()
     }
     
@@ -68,7 +45,6 @@ public class QuotaView: NSView {
         autoresizingMask = [.width]
         setupView()
         
-        layoutSubtreeIfNeeded()
         let calculatedHeight = fittingSize.height
         frame = NSRect(x: 0, y: 0, width: Layout.viewWidth, height: calculatedHeight)
     }
@@ -81,24 +57,41 @@ public class QuotaView: NSView {
     
     // MARK: - Component Creation
     private func createViewComponents() -> ViewComponents {
+        let (upsellView, upsellHeight) = createUpsellView()
         return ViewComponents(
             titleContainer: createTitleContainer(),
-            progressViews: createProgressViews(),
+            progressViews: isCBCEUnlimited ? [] : createProgressViews(),
             statusMessageLabel: createStatusMessageLabel(),
+            unlimitedMessageLabel: isCBCEUnlimited ? createUnlimitedMessageLabel() : nil,
+            refreshTextLabel: (isCBCE && !isCBCEUnlimited) ? createRefreshTextLabel() : nil,
             resetTextLabel: createResetTextLabel(),
-            upsellLabel: createUpsellLabel()
+            upsellView: upsellView,
+            upsellHeight: upsellHeight
         )
     }
-    
+
     private func addSubviewsToHierarchy(_ components: ViewComponents) {
         addSubview(components.titleContainer)
-        components.progressViews.forEach { addSubview($0) }
-        if !isFreeUser {
-            addSubview(components.statusMessageLabel)
+        if isCBCEUnlimited {
+            if let label = components.unlimitedMessageLabel {
+                addSubview(label)
+            }
+            return
         }
-        addSubview(components.resetTextLabel)
-        if !(isOrgUser || (isFreeUser && isFreeQuotaRemaining)) {
-            addSubview(components.upsellLabel)
+        components.progressViews.forEach { addSubview($0) }
+        if isCBCE, let refreshLabel = components.refreshTextLabel {
+            if quotaInfo.premiumInteractions != nil {
+                addSubview(components.statusMessageLabel)
+            }
+            addSubview(refreshLabel)
+        } else {
+            if !isFreeUser, quotaInfo.premiumInteractions != nil || isPaidIndividualUser {
+                addSubview(components.statusMessageLabel)
+            }
+            addSubview(components.resetTextLabel)
+            if !(isCBCE || (isFreeUser && isFreeQuotaRemaining)) {
+                addSubview(components.upsellView)
+            }
         }
     }
 }
@@ -166,28 +159,33 @@ extension QuotaView {
 // MARK: - Progress Bars Section
 extension QuotaView {
     private func createProgressViews() -> [NSView] {
-        let completionsView = createProgressBarSection(
-            title: "Code Completions",
-            snapshot: completions
-        )
-        
-        let chatView = createProgressBarSection(
-            title: "Chat Messages",
-            snapshot: chat
-        )
-        
+        var items: [(String, QuotaSnapshot)] = []
+
         if isFreeUser {
-            return [completionsView, chatView]
+            let completionsTitle = tokenBasedBillingEnabled ? "Inline Suggestions" : "Code Completions"
+            let chatTitle = tokenBasedBillingEnabled ? "Included Credits" : "Chat Messages"
+            items.append((completionsTitle, quotaInfo.completions))
+            items.append((chatTitle, quotaInfo.chat))
+        } else if tokenBasedBillingEnabled {
+            if let premiumInteractions = quotaInfo.premiumInteractions {
+                items.append(("Included Credits", premiumInteractions))
+            }
+        } else {
+            // Original billing
+            if let premiumInteractions = quotaInfo.premiumInteractions {
+                items.append(("Premium Requests", premiumInteractions))
+            }
+            if !quotaInfo.completions.unlimited {
+                items.append(("Code Completions", quotaInfo.completions))
+            }
+            if !quotaInfo.chat.unlimited {
+                items.append(("Chat Messages", quotaInfo.chat))
+            }
         }
-        
-        let premiumView = createProgressBarSection(
-            title: "Premium Requests",
-            snapshot: premiumInteractions
-        )
-        
-        return [completionsView, chatView, premiumView]
+
+        return items.map { createProgressBarSection(title: $0.0, snapshot: $0.1) }
     }
-    
+
     private func createProgressBarSection(title: String, snapshot: QuotaSnapshot) -> NSView {
         let container = NSView()
         container.translatesAutoresizingMaskIntoConstraints = false
@@ -216,24 +214,29 @@ extension QuotaView {
     }
     
     private func createPercentageLabel(snapshot: QuotaSnapshot) -> NSTextField {
-        let usedPercentage = (100.0 - snapshot.percentRemaining)
-        let numberPart = usedPercentage.truncatingRemainder(dividingBy: 1) == 0
-            ? String(format: "%.0f", usedPercentage)
-            : String(format: "%.1f", usedPercentage)
-        let text = snapshot.unlimited ? "Included" : "\(numberPart)%"
-        
+        let text: String
+        if snapshot.unlimited {
+            text = "Included"
+        } else if let usedPercentage = snapshot.usedPercentage {
+            text = QuotaFormatting.formatUsedPercentage(usedPercentage)
+        } else if let quotaRemaining = snapshot.quotaRemaining {
+            text = "\(Int(quotaRemaining)) remaining"
+        } else {
+            text = "0%"
+        }
+
         let label = NSTextField(labelWithString: text)
         label.font = NSFont.systemFont(ofSize: Style.percentageFontSize, weight: .regular)
         label.translatesAutoresizingMaskIntoConstraints = false
         label.textColor = .secondaryLabelColor
         label.alignment = .right
-        
+
         return label
     }
-    
+
     private func addProgressBar(to container: NSView, snapshot: QuotaSnapshot, titleLabel: NSTextField, percentageLabel: NSTextField) {
-        let usedPercentage = 100.0 - snapshot.percentRemaining
-        let color = getProgressBarColor(for: usedPercentage)
+        let usedPercentage = snapshot.usedPercentage ?? 0
+        let color = progressBarColor(for: snapshot.usageLevel)
         
         let progressBackground = createProgressBackground(color: color)
         let progressFill = createProgressFill(color: color, usedPercentage: usedPercentage)
@@ -316,48 +319,69 @@ extension QuotaView {
         ])
     }
     
-    private func getProgressBarColor(for usedPercentage: Float) -> NSColor {
-        switch usedPercentage {
-        case 90...:
-            return .systemRed
-        case 75..<90:
-            return .systemYellow
-        default:
-            return .systemBlue
+    private func progressBarColor(for level: QuotaSnapshot.UsageLevel) -> NSColor {
+        switch level {
+        case .critical: return .systemRed
+        case .warning: return .systemYellow
+        case .healthy: return .systemBlue
         }
     }
 }
 
 // MARK: - Footer Section
 extension QuotaView {
-    private func createStatusMessageLabel() -> NSTextField {
-        let message = premiumInteractions.overagePermitted ?
-            "Additional paid premium requests enabled." :
-            "Additional paid premium requests disabled."
-        
-        let label = NSTextField(labelWithString: isFreeUser ? "" : message)
+    private func createUnlimitedMessageLabel() -> NSTextField {
+        let label = NSTextField(labelWithString: "You have no monthly limit on AI credits usage set by your organization.")
         label.font = NSFont.systemFont(ofSize: Style.footerFontSize, weight: .regular)
         label.translatesAutoresizingMaskIntoConstraints = false
         label.textColor = .secondaryLabelColor
         label.alignment = .left
+        label.lineBreakMode = .byWordWrapping
+        label.maximumNumberOfLines = 0
+        label.preferredMaxLayoutWidth = Layout.viewWidth - Layout.horizontalMargin * 2
         return label
     }
-    
-    private func createResetTextLabel() -> NSTextField {
-        
-        // Format reset date
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy.MM.dd"
-        
-        var resetText = "Allowance resets \(resetDate)."
-        
-        if let date = formatter.date(from: resetDate) {
-            let outputFormatter = DateFormatter()
-            outputFormatter.dateFormat = "MMMM d, yyyy"
-            let formattedDate = outputFormatter.string(from: date)
-            resetText = "Allowance resets \(formattedDate)."
+
+    private func createRefreshTextLabel() -> NSTextField {
+        let dateString = quotaInfo.resetDateUtc ?? quotaInfo.resetDate
+        let label = NSTextField(labelWithString: QuotaFormatting.formatResetText(dateString))
+        label.font = NSFont.systemFont(ofSize: Style.footerFontSize, weight: .regular)
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.textColor = .secondaryLabelColor
+        label.alignment = .left
+        label.lineBreakMode = .byWordWrapping
+        label.maximumNumberOfLines = 0
+        label.preferredMaxLayoutWidth = Layout.viewWidth - Layout.horizontalMargin * 2
+        return label
+    }
+
+    private func createStatusMessageLabel() -> NSTextField {
+        let overagePermitted = quotaInfo.overagePermitted
+        let message: String
+        if tokenBasedBillingEnabled {
+            message = overagePermitted ? "Additional usage enabled." : "Additional usage not enabled."
+        } else {
+            message = overagePermitted ?
+                "Additional paid premium requests enabled." :
+                "Additional paid premium requests disabled."
         }
-        
+
+        let label = NSTextField(labelWithString: isFreeUser ? "" : message)
+        label.font = NSFont.systemFont(ofSize: Style.footerFontSize, weight: .regular)
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.textColor = (tokenBasedBillingEnabled && overagePermitted) ? .labelColor : .secondaryLabelColor
+        label.alignment = .left
+        return label
+    }
+
+    private func createResetTextLabel() -> NSTextField {
+        let resetText: String
+        if tokenBasedBillingEnabled {
+            resetText = QuotaFormatting.formatResetText(quotaInfo.resetDateUtc ?? quotaInfo.resetDate)
+        } else {
+            resetText = legacyAllowanceResetText(quotaInfo.resetDate)
+        }
+
         let label = NSTextField(labelWithString: resetText)
         label.font = NSFont.systemFont(ofSize: Style.footerFontSize, weight: .regular)
         label.translatesAutoresizingMaskIntoConstraints = false
@@ -365,41 +389,133 @@ extension QuotaView {
         label.alignment = .left
         return label
     }
-    
-    private func createUpsellLabel() -> NSButton {
-        if isFreeUser {
-            let button = NSButton()
-            let upgradeTitle = "Upgrade to Copilot Pro"
 
-            button.translatesAutoresizingMaskIntoConstraints = false
-            button.bezelStyle = .push
-            if isFreeQuotaUsedUp {
+    private func legacyAllowanceResetText(_ dateString: String) -> String {
+        for format in ["yyyy-MM-dd", "yyyy.MM.dd"] {
+            let formatter = DateFormatter()
+            formatter.dateFormat = format
+            if let date = formatter.date(from: dateString) {
+                let outputFormatter = DateFormatter()
+                outputFormatter.dateFormat = "MMMM d, yyyy"
+                return "Allowance resets \(outputFormatter.string(from: date))."
+            }
+        }
+        return "Allowance resets \(dateString)."
+    }
+    
+    private func createUpsellView() -> (NSView, CGFloat) {
+        if tokenBasedBillingEnabled || isFreeUser {
+            var buttons: [NSButton] = []
+            if tokenBasedBillingEnabled, isPaidIndividualUser {
+                let overagePermitted = quotaInfo.premiumInteractions?.overagePermitted ?? false
+                let primaryTitle = overagePermitted ? "Increase Budget" : "Enable Additional Usage"
+                buttons.append(makeProminentButton(title: primaryTitle, action: #selector(openCopilotManageOverage)))
+            }
+            if canUpgradePlan {
+                if isFreeUser, !tokenBasedBillingEnabled {
+                    buttons.append(createUpgradeToProButton())
+                } else {
+                    let upgrade = buttons.isEmpty
+                        ? makeProminentButton(title: "Upgrade Plan", action: #selector(openCopilotUpgradePlan))
+                        : makeBorderedButton(title: "Upgrade Plan", action: #selector(openCopilotUpgradePlan))
+                    buttons.append(upgrade)
+                }
+            }
+            switch buttons.count {
+            case 1:
+                let height = (isFreeUser && !tokenBasedBillingEnabled)
+                    ? Layout.upgradeButtonHeight
+                    : Layout.compactUpgradeButtonHeight
+                return (buttons[0], height)
+            case 2: return (makeButtonStack(buttons: buttons), Layout.dualButtonHeight)
+            default:
+                if isFreeUser { return (NSView(), 0) }
+                break // TBB org/CBCE: fall through to default link
+            }
+        }
+
+        let button = HoverButton()
+        let title = tokenBasedBillingEnabled ? "Manage your Budget" : "Manage paid premium requests"
+        button.setLinkStyle(title: title, fontSize: Style.footerFontSize)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.alphaValue = Style.labelAlphaValue
+        button.alignment = .left
+        button.target = self
+        button.action = #selector(openCopilotManageOverage)
+        return (button, Layout.linkLabelHeight)
+    }
+
+    private func createUpgradeToProButton() -> NSButton {
+        let button = NSButton()
+        let upgradeTitle = "Upgrade to Copilot Pro"
+
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.bezelStyle = .push
+        if isFreeQuotaUsedUp {
+            if #available(macOS 26.0, *) {
+                button.attributedTitle = NSAttributedString(
+                    string: upgradeTitle,
+                    attributes: [.foregroundColor: NSColor.controlTextColor]
+                )
+                button.bezelColor = .controlBackgroundColor
+            } else {
                 button.attributedTitle = NSAttributedString(
                     string: upgradeTitle,
                     attributes: [.foregroundColor: NSColor.white]
                 )
                 button.bezelColor = .controlAccentColor
-            } else {
-                button.title = upgradeTitle
             }
-            button.controlSize = .large
-            button.target = self
-            button.action = #selector(openCopilotUpgradePlan)
-
-            return button
         } else {
-            let button = HoverButton()
-            let title = "Manage paid premium requests"
-            
-            button.setLinkStyle(title: title, fontSize: Style.footerFontSize)
-            button.translatesAutoresizingMaskIntoConstraints = false
-            button.alphaValue = Style.labelAlphaValue
-            button.alignment = .left
-            button.target = self
-            button.action = #selector(openCopilotManageOverage)
-            
-            return button
+            button.title = upgradeTitle
         }
+        button.controlSize = .large
+        button.target = self
+        button.action = #selector(openCopilotUpgradePlan)
+        return button
+    }
+
+    private func makeProminentButton(title: String, action: Selector) -> NSButton {
+        let button = NSButton()
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.bezelStyle = .push
+        button.controlSize = .regular
+        button.isBordered = false
+        button.wantsLayer = true
+        button.layer?.backgroundColor = NSColor.controlAccentColor.cgColor
+        button.layer?.cornerRadius = 6
+        button.attributedTitle = NSAttributedString(
+            string: title,
+            attributes: [.foregroundColor: NSColor.white]
+        )
+        button.target = self
+        button.action = action
+        return button
+    }
+
+    private func makeBorderedButton(title: String, action: Selector) -> NSButton {
+        let button = NSButton()
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.bezelStyle = .push
+        button.controlSize = .regular
+        button.title = title
+        button.target = self
+        button.action = action
+        return button
+    }
+
+    private func makeButtonStack(buttons: [NSButton]) -> NSStackView {
+        let stack = NSStackView(views: buttons)
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.distribution = .fillEqually
+        stack.spacing = 6
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        for button in buttons {
+            button.leadingAnchor.constraint(equalTo: stack.leadingAnchor).isActive = true
+            button.trailingAnchor.constraint(equalTo: stack.trailingAnchor).isActive = true
+            button.heightAnchor.constraint(equalToConstant: 24).isActive = true
+        }
+        return stack
     }
 }
 
@@ -412,16 +528,26 @@ extension QuotaView {
     
     private func buildConstraints(_ components: ViewComponents) -> [NSLayoutConstraint] {
         var constraints: [NSLayoutConstraint] = []
-        
+
         // Title constraints
         constraints.append(contentsOf: buildTitleConstraints(components.titleContainer))
-        
+
+        if let unlimitedLabel = components.unlimitedMessageLabel {
+            constraints.append(contentsOf: [
+                unlimitedLabel.topAnchor.constraint(equalTo: components.titleContainer.bottomAnchor, constant: Layout.verticalSpacing),
+                unlimitedLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Layout.horizontalMargin),
+                unlimitedLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Layout.horizontalMargin),
+                unlimitedLabel.bottomAnchor.constraint(equalTo: bottomAnchor)
+            ])
+            return constraints
+        }
+
         // Progress view constraints
         constraints.append(contentsOf: buildProgressViewConstraints(components))
-        
+
         // Footer constraints
         constraints.append(contentsOf: buildFooterConstraints(components))
-        
+
         return constraints
     }
     
@@ -435,109 +561,94 @@ extension QuotaView {
     }
     
     private func buildProgressViewConstraints(_ components: ViewComponents) -> [NSLayoutConstraint] {
-        let completionsView = components.progressViews[0]
-        let chatView = components.progressViews[1]
-        
         var constraints: [NSLayoutConstraint] = []
-        
-        if !isFreeUser {
-            let premiumView = components.progressViews[2]
-            constraints.append(contentsOf: buildPremiumProgressConstraints(premiumView, titleContainer: components.titleContainer))
-            constraints.append(contentsOf: buildCompletionsProgressConstraints(completionsView, topView: premiumView, isPremiumUnlimited: premiumInteractions.unlimited))
-        } else {
-            constraints.append(contentsOf: buildCompletionsProgressConstraints(completionsView, topView: components.titleContainer, isPremiumUnlimited: false))
+        var previousView: NSView = components.titleContainer
+
+        for progressView in components.progressViews {
+            constraints.append(contentsOf: [
+                progressView.topAnchor.constraint(equalTo: previousView.bottomAnchor, constant: Layout.verticalSpacing),
+                progressView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Layout.horizontalMargin),
+                progressView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Layout.horizontalMargin),
+                progressView.heightAnchor.constraint(equalToConstant: Layout.progressBarHeight)
+            ])
+            previousView = progressView
         }
-        
-        constraints.append(contentsOf: buildChatProgressConstraints(chatView, topView: completionsView))
-        
+
         return constraints
     }
-    
-    private func buildPremiumProgressConstraints(_ premiumView: NSView, titleContainer: NSView) -> [NSLayoutConstraint] {
-        return [
-            premiumView.topAnchor.constraint(equalTo: titleContainer.bottomAnchor, constant: Layout.verticalSpacing),
-            premiumView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Layout.horizontalMargin),
-            premiumView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Layout.horizontalMargin),
-            premiumView.heightAnchor.constraint(
-                equalToConstant: premiumInteractions.unlimited ? Layout.unlimitedProgressBarHeight : Layout.progressBarHeight
-            )
-        ]
-    }
-    
-    private func buildCompletionsProgressConstraints(_ completionsView: NSView, topView: NSView, isPremiumUnlimited: Bool) -> [NSLayoutConstraint] {
-        let topSpacing = isPremiumUnlimited ? Layout.unlimitedVerticalSpacing : Layout.verticalSpacing
-        
-        return [
-            completionsView.topAnchor.constraint(equalTo: topView.bottomAnchor, constant: topSpacing),
-            completionsView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Layout.horizontalMargin),
-            completionsView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Layout.horizontalMargin),
-            completionsView.heightAnchor.constraint(
-                equalToConstant: completions.unlimited ? Layout.unlimitedProgressBarHeight : Layout.progressBarHeight
-            )
-        ]
-    }
-    
-    private func buildChatProgressConstraints(_ chatView: NSView, topView: NSView) -> [NSLayoutConstraint] {
-        let topSpacing = completions.unlimited ? Layout.unlimitedVerticalSpacing : Layout.verticalSpacing
-        
-        return [
-            chatView.topAnchor.constraint(equalTo: topView.bottomAnchor, constant: topSpacing),
-            chatView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Layout.horizontalMargin),
-            chatView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Layout.horizontalMargin),
-            chatView.heightAnchor.constraint(
-                equalToConstant: chat.unlimited ? Layout.unlimitedProgressBarHeight : Layout.progressBarHeight
-            )
-        ]
-    }
-    
+
     private func buildFooterConstraints(_ components: ViewComponents) -> [NSLayoutConstraint] {
-        let chatView = components.progressViews[1]
-        let topSpacing = chat.unlimited ? Layout.unlimitedVerticalSpacing : Layout.verticalSpacing
-        
+        let lastProgressView = components.progressViews.last ?? components.titleContainer
+        let showResetText = true
+
         var constraints = [NSLayoutConstraint]()
-        
-        if !isFreeUser {
-            // Add status message label constraints
+
+        // CB/CE non-unlimited: show refresh text label + status message (if premium info exists)
+        if let refreshLabel = components.refreshTextLabel {
             constraints.append(contentsOf: [
-                components.statusMessageLabel.topAnchor.constraint(equalTo: chatView.bottomAnchor, constant: topSpacing),
-                components.statusMessageLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Layout.horizontalMargin),
-                components.statusMessageLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Layout.horizontalMargin),
-                components.statusMessageLabel.heightAnchor.constraint(equalToConstant: Layout.footerTextHeight)
+                refreshLabel.topAnchor.constraint(equalTo: lastProgressView.bottomAnchor, constant: Layout.smallVerticalSpacing),
+                refreshLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Layout.horizontalMargin),
+                refreshLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Layout.horizontalMargin),
+                refreshLabel.heightAnchor.constraint(equalToConstant: Layout.footerTextHeight)
             ])
-            
-            // Add reset text label constraints with status message label as the top anchor
-            constraints.append(contentsOf: [
-                components.resetTextLabel.topAnchor.constraint(equalTo: components.statusMessageLabel.bottomAnchor),
-                components.resetTextLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Layout.horizontalMargin),
-                components.resetTextLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Layout.horizontalMargin),
-                components.resetTextLabel.heightAnchor.constraint(equalToConstant: Layout.footerTextHeight)
-            ])
-        } else {
-            // For free users, only show reset text label
-            constraints.append(contentsOf: [
-                components.resetTextLabel.topAnchor.constraint(equalTo: chatView.bottomAnchor, constant: topSpacing),
-                components.resetTextLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Layout.horizontalMargin),
-                components.resetTextLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Layout.horizontalMargin),
-                components.resetTextLabel.heightAnchor.constraint(equalToConstant: Layout.footerTextHeight)
-            ])
-        }
-        
-        if isOrgUser || (isFreeUser && isFreeQuotaRemaining) {
-            // Do not show link label for business or enterprise users
-            constraints.append(components.resetTextLabel.bottomAnchor.constraint(equalTo: bottomAnchor))
+            var anchor: NSView = refreshLabel
+            if quotaInfo.premiumInteractions != nil {
+                let statusHeight = tokenBasedBillingEnabled ? Layout.statusMessageHeight : Layout.footerTextHeight
+                constraints.append(contentsOf: [
+                    components.statusMessageLabel.topAnchor.constraint(equalTo: anchor.bottomAnchor, constant: Layout.verticalSpacing),
+                    components.statusMessageLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Layout.horizontalMargin),
+                    components.statusMessageLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Layout.horizontalMargin),
+                    components.statusMessageLabel.heightAnchor.constraint(equalToConstant: statusHeight)
+                ])
+                anchor = components.statusMessageLabel
+            }
+            constraints.append(anchor.bottomAnchor.constraint(equalTo: bottomAnchor))
             return constraints
         }
-        
+
+        // Anchor for the element after progress views
+        var lastAnchorView: NSView = lastProgressView
+
+        if showResetText {
+            let resetTopSpacing = isFreeUser ? Layout.verticalSpacing : Layout.smallVerticalSpacing
+            constraints.append(contentsOf: [
+                components.resetTextLabel.topAnchor.constraint(equalTo: lastProgressView.bottomAnchor, constant: resetTopSpacing),
+                components.resetTextLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Layout.horizontalMargin),
+                components.resetTextLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Layout.horizontalMargin),
+                components.resetTextLabel.heightAnchor.constraint(equalToConstant: Layout.footerTextHeight)
+            ])
+            lastAnchorView = components.resetTextLabel
+        }
+
+        if !isFreeUser, quotaInfo.premiumInteractions != nil || isPaidIndividualUser {
+            let statusHeight = tokenBasedBillingEnabled ? Layout.statusMessageHeight : Layout.footerTextHeight
+            constraints.append(contentsOf: [
+                components.statusMessageLabel.topAnchor.constraint(equalTo: lastAnchorView.bottomAnchor, constant: Layout.verticalSpacing),
+                components.statusMessageLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Layout.horizontalMargin),
+                components.statusMessageLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Layout.horizontalMargin),
+                components.statusMessageLabel.heightAnchor.constraint(equalToConstant: statusHeight)
+            ])
+            lastAnchorView = components.statusMessageLabel
+        }
+
+        if isCBCE || (isFreeUser && isFreeQuotaRemaining) {
+            constraints.append(lastAnchorView.bottomAnchor.constraint(equalTo: bottomAnchor))
+            return constraints
+        }
+
         // Add link label constraints
+        let isTallButton = components.upsellHeight == Layout.upgradeButtonHeight || components.upsellHeight == Layout.compactUpgradeButtonHeight
+        let upsellTopSpacing: CGFloat = isTallButton ? Layout.smallVerticalSpacing : 0
+        let upsellBottomSpacing: CGFloat = isTallButton ? -Layout.smallVerticalSpacing : 0
         constraints.append(contentsOf: [
-            components.upsellLabel.topAnchor.constraint(equalTo: components.resetTextLabel.bottomAnchor),
-            components.upsellLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Layout.horizontalMargin),
-            components.upsellLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Layout.horizontalMargin),
-            components.upsellLabel.heightAnchor.constraint(equalToConstant: isFreeUser ? Layout.upgradeButtonHeight : Layout.linkLabelHeight),
-            
-            components.upsellLabel.bottomAnchor.constraint(equalTo: bottomAnchor)
+            components.upsellView.topAnchor.constraint(equalTo: lastAnchorView.bottomAnchor, constant: upsellTopSpacing),
+            components.upsellView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Layout.horizontalMargin),
+            components.upsellView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Layout.horizontalMargin),
+            components.upsellView.heightAnchor.constraint(equalToConstant: components.upsellHeight),
+
+            components.upsellView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: upsellBottomSpacing)
         ])
-        
+
         return constraints
     }
 }
@@ -545,26 +656,20 @@ extension QuotaView {
 // MARK: - Actions
 extension QuotaView {
     @objc private func openCopilotSettings() {
-        Task {
-            if let url = URL(string: "https://aka.ms/github-copilot-settings") {
-                NSWorkspace.shared.open(url)
-            }
-        }
+        openURL(QuotaFormatting.settingsURL)
     }
-    
+
     @objc private func openCopilotManageOverage() {
-        Task {
-            if let url = URL(string: "https://aka.ms/github-copilot-manage-overage") {
-                NSWorkspace.shared.open(url)
-            }
-        }
+        openURL(QuotaFormatting.manageOverageURL)
     }
-    
+
     @objc private func openCopilotUpgradePlan() {
-        Task {
-            if let url = URL(string: "https://aka.ms/github-copilot-upgrade-plan") {
-                NSWorkspace.shared.open(url)
-            }
+        openURL(QuotaFormatting.upgradePlanURL)
+    }
+
+    private func openURL(_ urlString: String) {
+        if let url = URL(string: urlString) {
+            NSWorkspace.shared.open(url)
         }
     }
 }
@@ -574,24 +679,30 @@ private struct ViewComponents {
     let titleContainer: NSView
     let progressViews: [NSView]
     let statusMessageLabel: NSTextField
+    let unlimitedMessageLabel: NSTextField?
+    let refreshTextLabel: NSTextField?
     let resetTextLabel: NSTextField
-    let upsellLabel: NSButton
+    let upsellView: NSView
+    let upsellHeight: CGFloat
 }
 
 // MARK: - Layout Constants
 private struct Layout {
     static let viewWidth: CGFloat = 256
     static let horizontalMargin: CGFloat = 14
-    static let verticalSpacing: CGFloat = 8
+    static let verticalSpacing: CGFloat = 6
     static let unlimitedVerticalSpacing: CGFloat = 6
-    static let smallVerticalSpacing: CGFloat = 4
+    static let smallVerticalSpacing: CGFloat = 2
     
     static let titleHeight: CGFloat = 20
     static let progressBarHeight: CGFloat = 22
     static let unlimitedProgressBarHeight: CGFloat = 16
     static let footerTextHeight: CGFloat = 16
+    static let statusMessageHeight: CGFloat = 20
     static let linkLabelHeight: CGFloat = 16
     static let upgradeButtonHeight: CGFloat = 40
+    static let compactUpgradeButtonHeight: CGFloat = 28
+    static let dualButtonHeight: CGFloat = 54
     
     static let settingsButtonSize: CGFloat = 20
     static let settingsButtonHoverSize: CGFloat = 14

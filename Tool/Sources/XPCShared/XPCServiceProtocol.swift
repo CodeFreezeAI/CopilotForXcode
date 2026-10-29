@@ -8,13 +8,17 @@ public protocol XPCServiceProtocol {
     func getNextSuggestedCode(editorContent: Data, withReply reply: @escaping (_ updatedContent: Data?, Error?) -> Void)
     func getPreviousSuggestedCode(editorContent: Data, withReply reply: @escaping (_ updatedContent: Data?, Error?) -> Void)
     func getSuggestionAcceptedCode(editorContent: Data, withReply reply: @escaping (_ updatedContent: Data?, Error?) -> Void)
+    func getNESSuggestionAcceptedCode(editorContent: Data, withReply reply: @escaping (_ updatedContent: Data?, Error?) -> Void)
     func getSuggestionRejectedCode(editorContent: Data, withReply reply: @escaping (_ updatedContent: Data?, Error?) -> Void)
+    func getNESSuggestionRejectedCode(editorContent: Data, withReply reply: @escaping (_ updatedContent: Data?, Error?) -> Void)
     func getRealtimeSuggestedCode(editorContent: Data, withReply reply: @escaping (Data?, Error?) -> Void)
     func getPromptToCodeAcceptedCode(editorContent: Data, withReply reply: @escaping (_ updatedContent: Data?, Error?) -> Void)
     func openChat(withReply reply: @escaping (Error?) -> Void)
     func promptToCode(editorContent: Data, withReply reply: @escaping (Data?, Error?) -> Void)
     func customCommand(id: String, editorContent: Data, withReply reply: @escaping (Data?, Error?) -> Void)
+    
     func toggleRealtimeSuggestion(withReply reply: @escaping (Error?) -> Void)
+    func toggleRealtimeNES(withReply reply: @escaping (Error?) -> Void)
     func prefetchRealtimeSuggestions(editorContent: Data, withReply reply: @escaping () -> Void)
 
     func getXPCServiceVersion(withReply reply: @escaping (String, String) -> Void)
@@ -24,13 +28,29 @@ public protocol XPCServiceProtocol {
     func getXcodeInspectorData(withReply reply: @escaping (Data?, Error?) -> Void)
 
     func getAvailableMCPServerToolsCollections(withReply reply: @escaping (Data?) -> Void)
-    func updateMCPServerToolsStatus(tools: Data)
+    func updateMCPServerToolsStatus(
+        tools: Data,
+        chatAgentMode: Data?,
+        customChatModeId: Data?,
+        workspaceFolders: Data?
+    )
     func listMCPRegistryServers(_ params: Data, withReply reply: @escaping (Data?, Error?) -> Void)
     func getMCPRegistryServer(_ params: Data, withReply reply: @escaping (Data?, Error?) -> Void)
+    func getMCPRegistryAllowlist(withReply reply: @escaping (Data?, Error?) -> Void)
     func getAvailableLanguageModelTools(withReply reply: @escaping (Data?) -> Void)
-    func updateToolsStatus(tools: Data, withReply reply: @escaping (Data?) -> Void)
+    func refreshClientTools(withReply reply: @escaping (Data?) -> Void)
+    func updateToolsStatus(
+        tools: Data,
+        chatAgentMode: Data?,
+        customChatModeId: Data?,
+        workspaceFolders: Data?,
+        withReply reply: @escaping (Data?) -> Void
+    )
 
     func getCopilotFeatureFlags(withReply reply: @escaping (Data?) -> Void)
+    func getCopilotPolicy(withReply reply: @escaping (Data?) -> Void)
+    func updateCopilotModels(withReply reply: @escaping (Data?, Error?) -> Void)
+    func getModes(workspaceFolders: Data?, withReply reply: @escaping (Data?, Error?) -> Void)
 
     func signOutAllGitHubCopilotService()
     func getXPCServiceAuthStatus(withReply reply: @escaping (Data?) -> Void)

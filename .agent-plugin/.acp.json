@@ -1,0 +1,20 @@
+{
+  "github-copilot": {
+    "distribution": {
+      "binary": {
+        "darwin-aarch64": {
+          "archive": "https://github.com/github/copilot-cli/releases/download/v1.0.78/copilot-darwin-arm64.tar.gz",
+          "cmd": "./copilot",
+          "args": ["--acp"],
+          "env": {}
+        }
+      }
+    },
+    "extendedFeatures": {
+      "userConfigFile": {
+        "path": "~/.copilot/settings.json",
+        "description": "GitHub Copilot configuration and authentication credentials. Populated automatically by `copilot login`; set `store_token_plaintext: true` and add a token under `copilot_tokens` to supply credentials without an interactive session."
+      }
+    }
+  }
+}

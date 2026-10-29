@@ -28,11 +28,11 @@ public struct CopyButton: View {
         }) {
             Image(systemName: isCopied ? "checkmark.circle" : "doc.on.doc")
                 .resizable()
-                .aspectRatio(contentMode: .fit)
-                .scaledFrame(width: 14, height: 14)
+                .scaledToFit()
+                .scaledPadding(2)
+                .scaledFrame(width: 16, height: 16)
                 .foregroundColor(foregroundColor ?? .secondary)
                 .conditionalFontWeight(fontWeight)
-                .padding(4)
         }
         .buttonStyle(HoverButtonStyle(padding: 0))
         .help("Copy")

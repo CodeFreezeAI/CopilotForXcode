@@ -2,15 +2,16 @@ import ChatTab
 import ConversationServiceProvider
 import Foundation
 import JSONRPC
+import ChatAPIService
 
 public protocol ToolContextProvider {
     // MARK: insert_edit_into_file
     var chatTabInfo: ChatTabInfo { get }
     func updateFileEdits(by fileEdit: FileEdit) -> Void
     func notifyChangeTextDocument(fileURL: URL, content: String, version: Int) async throws
+    func updateChatHistory(_ turnId: String, editAgentRounds: [AgentRound], fileEdits: [FileEdit])
 }
 
-public typealias ChatHistoryUpdater = (String, [AgentRound]) -> Void
 
 public protocol ICopilotTool {
     /**
@@ -18,7 +19,6 @@ public protocol ICopilotTool {
       *  - Parameters:
       *      - request: The tool invocation request.
       *      - completion: Closure called with JSON-RPC response when tool execution completes.
-      *      - chatHistoryUpdater: Optional closure to update chat history during tool execution.
       *      - contextProvider: Optional provider that supplies additional context information
       *                         needed for tool execution, such as chat tab data and file editing capabilities.
       *  - Returns: Boolean indicating if the tool call has completed. True if the tool call is completed, false otherwise.
@@ -26,7 +26,6 @@ public protocol ICopilotTool {
     func invokeTool(
         _ request: InvokeClientToolRequest,
         completion: @escaping (AnyJSONRPCResponse) -> Void,
-        chatHistoryUpdater: ChatHistoryUpdater?,
         contextProvider: ToolContextProvider?
     ) -> Bool
 }
@@ -85,4 +84,8 @@ extension ICopilotTool {
     }
 }
 
-extension ChatService: ToolContextProvider { }
+extension ChatService: ToolContextProvider {
+    public func updateChatHistory(_ turnId: String, editAgentRounds: [AgentRound], fileEdits: [FileEdit] = []) {
+        appendToolCallHistory(turnId: turnId, editAgentRounds: editAgentRounds, fileEdits: fileEdits)
+    }
+}

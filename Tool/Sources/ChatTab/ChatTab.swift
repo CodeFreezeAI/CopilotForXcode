@@ -19,7 +19,7 @@ public struct ChatTabPreviewInfo: Identifiable, Equatable, Codable {
 
 /// The information of a tab.
 @ObservableState
-public struct ChatTabInfo: Identifiable, Equatable, Codable {
+public struct ChatTabInfo: Identifiable, Equatable, Hashable, Codable {
     public var id: String
     public var title: String? = nil
     public var isTitleSet: Bool {

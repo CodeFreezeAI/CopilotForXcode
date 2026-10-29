@@ -55,8 +55,6 @@ public struct AutoresizingCustomTextEditor: View {
             onTextEditorStateChanged: onTextEditorStateChanged
         )
         .frame(height: textEditorHeight)
-        .padding(.top, 1)
-        .padding(.bottom, -1)
     }
 }
 

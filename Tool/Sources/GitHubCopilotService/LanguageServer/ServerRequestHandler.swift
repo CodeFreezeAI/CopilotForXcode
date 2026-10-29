@@ -1,6 +1,6 @@
-import Foundation
-import ConversationServiceProvider
 import Combine
+import ConversationServiceProvider
+import Foundation
 import JSONRPC
 import LanguageClient
 import LanguageServerProtocol
@@ -10,91 +10,112 @@ public typealias ResponseHandler = ServerRequest.Handler<JSONValue>
 public typealias LegacyResponseHandler = (AnyJSONRPCResponse) -> Void
 
 protocol ServerRequestHandler {
-    func handleRequest(_ request: AnyJSONRPCRequest, workspaceURL: URL, callback: @escaping ResponseHandler, service: GitHubCopilotService?)
+    func handleRequest(id: JSONId, _ request: ServerRequest, workspaceURL: URL, service: GitHubCopilotService?)
 }
 
-class ServerRequestHandlerImpl : ServerRequestHandler {
+class ServerRequestHandlerImpl: ServerRequestHandler {
     public static let shared = ServerRequestHandlerImpl()
     private let conversationContextHandler: ConversationContextHandler = ConversationContextHandlerImpl.shared
     private let watchedFilesHandler: WatchedFilesHandler = WatchedFilesHandlerImpl.shared
     private let showMessageRequestHandler: ShowMessageRequestHandler = ShowMessageRequestHandlerImpl.shared
-    private let mcpOAuthRequestHandler: MCPOAuthRequestHandler = MCPOAuthRequestHandlerImpl.shared
+    private let dynamicOAuthRequestHandler: DynamicOAuthRequestHandler = DynamicOAuthRequestHandlerImpl.shared
 
-    func handleRequest(_ request: AnyJSONRPCRequest, workspaceURL: URL, callback: @escaping ResponseHandler, service: GitHubCopilotService?) {
-        let methodName = request.method
-        let legacyResponseHandler = toLegacyResponseHandler(callback)
-        do {
-            switch methodName {
-            case "conversation/context":
-                let params = try JSONEncoder().encode(request.params)
-                let contextParams = try JSONDecoder().decode(ConversationContextParams.self, from: params)
-                conversationContextHandler.handleConversationContext(
-                    ConversationContextRequest(id: request.id, method: request.method, params: contextParams),
-                    completion: legacyResponseHandler)
-                
-            case "copilot/watchedFiles":
-                let params = try JSONEncoder().encode(request.params)
-                let watchedFilesParams = try JSONDecoder().decode(WatchedFilesParams.self, from: params)
-                watchedFilesHandler.handleWatchedFiles(WatchedFilesRequest(id: request.id, method: request.method, params: watchedFilesParams), workspaceURL: workspaceURL, completion: legacyResponseHandler, service: service)
-                
-            case "window/showMessageRequest":
-                let params = try JSONEncoder().encode(request.params)
-                let showMessageRequestParams = try JSONDecoder().decode(ShowMessageRequestParams.self, from: params)
-                showMessageRequestHandler
-                    .handleShowMessage(
+    func handleRequest(id: JSONId, _ request: ServerRequest, workspaceURL: URL, service: GitHubCopilotService?) {
+        switch request {
+        case let .windowShowMessageRequest(params, callback):
+            if workspaceURL.path != "/" {
+                do {
+                    let paramsData = try JSONEncoder().encode(params)
+                    let showMessageRequestParams = try JSONDecoder().decode(ShowMessageRequestParams.self, from: paramsData)
+
+                    showMessageRequestHandler.handleShowMessageRequest(
                         ShowMessageRequest(
-                            id: request.id,
-                            method: request.method,
+                            id: id,
+                            method: "window/showMessageRequest",
                             params: showMessageRequestParams
                         ),
+                        callback: callback
+                    )
+                } catch {
+                    Task {
+                        await callback(.success(nil))
+                    }
+                }
+            }
+
+        case let .custom(method, params, callback):
+            let legacyResponseHandler = toLegacyResponseHandler(callback)
+            do {
+                switch method {
+                case "conversation/context":
+                    let paramsData = try JSONEncoder().encode(params)
+                    let contextParams = try JSONDecoder().decode(ConversationContextParams.self, from: paramsData)
+                    conversationContextHandler.handleConversationContext(
+                        ConversationContextRequest(id: id, method: method, params: contextParams),
                         completion: legacyResponseHandler
                     )
 
-            case "conversation/invokeClientTool":
-                let params = try JSONEncoder().encode(request.params)
-                let invokeParams = try JSONDecoder().decode(InvokeClientToolParams.self, from: params)
-                ClientToolHandlerImpl.shared.invokeClientTool(InvokeClientToolRequest(id: request.id, method: request.method, params: invokeParams), completion: legacyResponseHandler)
+                case "copilot/watchedFiles":
+                    let paramsData = try JSONEncoder().encode(params)
+                    let watchedFilesParams = try JSONDecoder().decode(WatchedFilesParams.self, from: paramsData)
+                    watchedFilesHandler.handleWatchedFiles(
+                        WatchedFilesRequest(id: id, method: method, params: watchedFilesParams),
+                        workspaceURL: workspaceURL,
+                        completion: legacyResponseHandler,
+                        service: service
+                    )
 
-            case "conversation/invokeClientToolConfirmation":
-                let params = try JSONEncoder().encode(request.params)
-                let invokeParams = try JSONDecoder().decode(InvokeClientToolParams.self, from: params)
-                ClientToolHandlerImpl.shared.invokeClientToolConfirmation(InvokeClientToolConfirmationRequest(id: request.id, method: request.method, params: invokeParams), completion: legacyResponseHandler)
+                case "conversation/invokeClientTool":
+                    let paramsData = try JSONEncoder().encode(params)
+                    let invokeParams = try JSONDecoder().decode(InvokeClientToolParams.self, from: paramsData)
+                    ClientToolHandlerImpl.shared.invokeClientTool(
+                        InvokeClientToolRequest(id: id, method: method, params: invokeParams),
+                        completion: legacyResponseHandler
+                    )
 
-            case "copilot/mcpOAuth":
-                let params = try JSONEncoder().encode(request.params)
-                let mcpOAuthRequestParams = try JSONDecoder().decode(MCPOAuthRequestParams.self, from: params)
-                mcpOAuthRequestHandler.handleShowOAuthMessage(
-                    MCPOAuthRequest(
-                        id: request.id,
-                        method: request.method,
-                        params: mcpOAuthRequestParams
-                    ),
-                    completion: legacyResponseHandler
-                )
+                case "conversation/invokeClientToolConfirmation":
+                    let paramsData = try JSONEncoder().encode(params)
+                    let invokeParams = try JSONDecoder().decode(InvokeClientToolParams.self, from: paramsData)
+                    ClientToolHandlerImpl.shared.invokeClientToolConfirmation(
+                        InvokeClientToolConfirmationRequest(id: id, method: method, params: invokeParams),
+                        completion: legacyResponseHandler
+                    )
 
-            default:
-                break
+                case "copilot/dynamicOAuth":
+                    let paramsData = try JSONEncoder().encode(params)
+                    let dynamicOAuthParams = try JSONDecoder().decode(DynamicOAuthParams.self, from: paramsData)
+                    DynamicOAuthRequestHandlerImpl.shared.handleDynamicOAuthRequest(
+                        DynamicOAuthRequest(id: id, method: method, params: dynamicOAuthParams),
+                        completion: legacyResponseHandler
+                    )
+
+                default:
+                    break
+                }
+            } catch {
+                handleError(id: id, method: method, error: error, callback: legacyResponseHandler)
             }
-        } catch {
-            handleError(request, error: error, callback: legacyResponseHandler)
+
+        default:
+            break
         }
     }
-    
-    private func handleError(_ request: AnyJSONRPCRequest, error: Error, callback: @escaping (AnyJSONRPCResponse) -> Void) {
+
+    private func handleError(id: JSONId, method: String, error: Error, callback: @escaping (AnyJSONRPCResponse) -> Void) {
         callback(
             AnyJSONRPCResponse(
-                id: request.id,
+                id: id,
                 result: JSONValue.array([
                     JSONValue.null,
                     JSONValue.hash([
-                        "code": .number(-32602/* Invalid params */),
-                        "message": .string("Error: \(error.localizedDescription)")])
+                        "code": .number(-32602 /* Invalid params */ ),
+                        "message": .string("Error handling \(method): \(error.localizedDescription)")]),
                 ])
             )
         )
         Logger.gitHubCopilot.error(error)
     }
-    
+
     /// Converts a new Handler to work with old code that expects LegacyResponseHandler
     private func toLegacyResponseHandler(
         _ newHandler: @escaping ResponseHandler

@@ -4,6 +4,7 @@ import Workspace
 import XPCShared
 
 public struct FilespaceSuggestionSnapshot: Equatable {
+    public let lines: [String]
     public let linesHash: Int
     public let prefixLinesHash: Int
     public let suffixLinesHash: Int
@@ -15,6 +16,7 @@ public struct FilespaceSuggestionSnapshot: Equatable {
             return max(min(index, lines.endIndex), lines.startIndex)
         }
 
+        self.lines = lines
         self.linesHash = lines.hashValue
         self.cursorPosition = cursorPosition
         self.prefixLinesHash = lines[0..<safeIndex(cursorPosition.line)].hashValue
@@ -38,11 +40,22 @@ public struct FilespaceSuggestionSnapshotKey: FilespacePropertyKey {
         -> FilespaceSuggestionSnapshot { .init(lines: [], cursorPosition: .outOfScope) }
 }
 
+public struct FilespaceNESSuggestionSnapshotKey: FilespacePropertyKey {
+    public static func createDefaultValue()
+        -> FilespaceSuggestionSnapshot { .init(lines: [], cursorPosition: .outOfScope) }
+}
+
 public extension FilespacePropertyValues {
     @WorkspaceActor
     var suggestionSourceSnapshot: FilespaceSuggestionSnapshot {
         get { self[FilespaceSuggestionSnapshotKey.self] }
         set { self[FilespaceSuggestionSnapshotKey.self] = newValue }
+    }
+    
+    @WorkspaceActor
+    var nesSuggestionSourceSnapshot: FilespaceSuggestionSnapshot {
+        get { self[FilespaceNESSuggestionSnapshotKey.self] }
+        set { self[FilespaceNESSuggestionSnapshotKey.self] = newValue }
     }
 }
 
@@ -51,6 +64,13 @@ public extension Filespace {
     func resetSnapshot() {
         // swiftformat:disable redundantSelf
         self.suggestionSourceSnapshot = FilespaceSuggestionSnapshotKey.createDefaultValue()
+        // swiftformat:enable all
+    }
+    
+    @WorkspaceActor
+    func resetNESSnapshot() {
+        // swiftformat:disable redundantSelf
+        self.nesSuggestionSourceSnapshot = FilespaceNESSuggestionSnapshotKey.createDefaultValue()
         // swiftformat:enable all
     }
 
@@ -125,6 +145,26 @@ public extension Filespace {
         resetSnapshot()
         return false
     }
-
+    
+    /// Validate the nes suggestion is still valid.
+    /// - Parameters:
+    ///   - lines: lines of the file
+    ///   - cursorPosition: cursor position
+    ///   - Returns: `true` if the nes suggestion is still valid
+    @WorkspaceActor
+    func validateNESSuggestions(lines: [String], cursorPosition: CursorPosition) -> Bool {
+        guard presentingNESSuggestion != nil else { return false }
+        
+        let updatedSnapshot = FilespaceSuggestionSnapshot(lines: lines, cursorPosition: cursorPosition)
+        
+        // document state is unchanged
+        if updatedSnapshot == self.nesSuggestionSourceSnapshot {
+            return true
+        }
+        
+        resetNESSuggestion()
+        resetNESSnapshot()
+        return false
+    }
 }
 

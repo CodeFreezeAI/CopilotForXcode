@@ -175,7 +175,7 @@ actor ExtensionServiceLauncher {
                                     return configuration
                                 }()
                             ) { app, error in
-                                if let error = error {
+                                if error != nil {
                                     continuation.resume(returning: nil)
                                 } else {
                                     continuation.resume(returning: app)

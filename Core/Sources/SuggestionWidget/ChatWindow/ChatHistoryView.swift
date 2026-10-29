@@ -19,18 +19,20 @@ struct ChatHistoryView: View {
 
             VStack(alignment: .center, spacing: 0) {
                 Header(isChatHistoryVisible: $isChatHistoryVisible)
-                    .frame(height: 32)
-                    .padding(.leading, 16)
-                    .padding(.trailing, 12)
+                    .scaledFrame(height: 32)
+                    .scaledPadding(.leading, 12)
+                    .scaledPadding(.trailing, 8)
                 
                 Divider()
                 
                 ChatHistorySearchBarView(searchText: $searchText)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 4)
+                    .scaledPadding(.leading, 12)
+                    .scaledPadding(.trailing, 8)
+                    .scaledPadding(.vertical, 8)
                 
                 ItemView(store: store, searchText: $searchText, isChatHistoryVisible: $isChatHistoryVisible)
-                    .padding(.horizontal, 16)
+                    .scaledPadding(.leading, 12)
+                    .scaledPadding(.trailing, 8)
             }
         }
     }
@@ -43,7 +45,8 @@ struct ChatHistoryView: View {
             HStack {
                 Text("Chat History")
                     .scaledFont(size: 13, weight: .bold)
-                    .lineLimit(nil)
+                    .scaledPadding(.leading, 4)
+                    .scaledFrame(maxWidth: 192, alignment: .leading)
                 
                 Spacer()
                 
@@ -80,7 +83,7 @@ struct ChatHistoryView: View {
                                 refreshStoredChatTabInfos()
                             }
                             .id(previewInfo.id)
-                            .frame(height: 61)
+                            .scaledFrame(height: 61)
                         }
                     }
                 }
@@ -180,6 +183,7 @@ struct ChatHistoryItemView: View {
                             
                             if isTabSelected() {
                                 Text("Current")
+                                    .scaledFont(.footnote)
                                     .foregroundStyle(.secondary)
                             }
                             
@@ -219,6 +223,7 @@ struct ChatHistoryItemView: View {
                 .padding(.horizontal, 12)
             }
             .frame(maxHeight: .infinity)
+            .contentShape(Rectangle())
             .onHover(perform: {
                 isHovered = $0
             })

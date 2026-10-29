@@ -5,24 +5,34 @@ public struct HoverButtonStyle: ButtonStyle {
     @State private var isHovered: Bool
     private var padding: CGFloat
     private var hoverColor: Color
+    private var backgroundColor: Color
+    private var cornerRadius: CGFloat
     
-    public init(isHovered: Bool = false, padding: CGFloat = 4, hoverColor: Color = .hoverColor) {
+    public init(
+        isHovered: Bool = false,
+        padding: CGFloat = 4,
+        hoverColor: Color = .hoverColor,
+        backgroundColor: Color = .clear,
+        cornerRadius: CGFloat = 4
+    ) {
         self.isHovered = isHovered
         self.padding = padding
         self.hoverColor = hoverColor
+        self.backgroundColor = backgroundColor
+        self.cornerRadius = cornerRadius
     }
 
     public func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .padding(padding)
+            .scaledPadding(padding)
             .background(
                 configuration.isPressed
                 ? Color.gray.opacity(0.2)
                     : isHovered
                         ? hoverColor
-                        : Color.clear
+                : backgroundColor
             )
-            .cornerRadius(4)
+            .cornerRadius(cornerRadius)
             .onHover { hover in
                 isHovered = hover
             }

@@ -6,6 +6,7 @@ import SuggestionBasic
 import Workspace
 import XCTest
 import XPCShared
+import LanguageServerProtocol
 
 @testable import Service
 
@@ -26,7 +27,7 @@ class MockSuggestionService: GitHubCopilotSuggestionServiceType {
         fatalError()
     }
 
-    func notifyChangeTextDocument(fileURL: URL, content: String, version: Int) async throws {
+    func notifyChangeTextDocument(fileURL: URL, content: String, version: Int, contentChanges: [LanguageServerProtocol.TextDocumentContentChangeEvent]?) async throws {
         fatalError()
     }
 
@@ -59,11 +60,27 @@ class MockSuggestionService: GitHubCopilotSuggestionServiceType {
         completions
     }
 
+    func getCopilotInlineEdit(
+        fileURL: URL,
+        content: String,
+        cursorPosition: SuggestionBasic.CursorPosition
+    ) async throws -> [SuggestionBasic.CodeSuggestion] {
+        completions
+    }
+
     func notifyShown(_ completion: SuggestionBasic.CodeSuggestion) async {
+        shown = completion.id
+    }
+    
+    func notifyCopilotInlineEditShown(_ completion: SuggestionBasic.CodeSuggestion) async {
         shown = completion.id
     }
 
     func notifyAccepted(_ completion: CodeSuggestion, acceptedLength: Int? = nil) async {
+        accepted = completion.id
+    }
+    
+    func notifyCopilotInlineEditAccepted(_ completion: CodeSuggestion) async {
         accepted = completion.id
     }
 

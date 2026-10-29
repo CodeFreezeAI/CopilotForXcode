@@ -69,7 +69,7 @@ public struct TelemetryCleaner {
             ("Email", "@[a-zA-Z0-9-]+\\.[a-zA-Z0-9-]+")
         ]
 
-        var cleanedValue = value
+        let cleanedValue = value
         for (label, pattern) in patterns {
             if let regex = try? NSRegularExpression(pattern: pattern) {
                 if regex.firstMatch(

@@ -80,8 +80,6 @@ public final class ConversationStorage: ConversationStorageProtocol {
         
         try withDBTransaction { db in
             
-            let now = Date().timeIntervalSince1970
-            
             for operation in request.operations {
                 switch operation {
                 case .upsertConversation(let conversationItems):
@@ -137,7 +135,7 @@ public final class ConversationStorage: ConversationStorageProtocol {
             let table = turnTable.table
             let column = turnTable.column
             
-            var query = table
+            let query = table
                 .filter(column.conversationID == conversationID)
                 .order(column.rowID.asc)
             let rowIterator = try db.prepareRowIterator(query)

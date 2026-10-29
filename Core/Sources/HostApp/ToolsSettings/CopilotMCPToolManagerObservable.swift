@@ -17,6 +17,7 @@ class CopilotMCPToolManagerObservable: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
                 guard let self = self else { return }
+                Logger.client.info("MCP tools change notification received")
                 Task {
                     await self.refreshMCPServerTools()
                 }
@@ -31,6 +32,7 @@ class CopilotMCPToolManagerObservable: ObservableObject {
 
     @MainActor
     private func refreshMCPServerTools() async {
+        Logger.client.info("Refreshing MCP server tools...")
         do {
             let service = try getService()
             let mcpTools = try await service.getAvailableMCPServerToolsCollections()
@@ -43,11 +45,14 @@ class CopilotMCPToolManagerObservable: ObservableObject {
     private func refreshTools(tools: [MCPServerToolsCollection]?) {
         guard let tools = tools else {
             // nil means the tools data is ready, and skip it first.
+            Logger.client.info("MCP tools data not ready yet, skipping refresh")
             return
         }
 
-        AppState.shared.cleanupMCPToolsStatus(availableTools: tools)
-        AppState.shared.createMCPToolsStatus(tools)
+        let totalToolsCount = tools.reduce(0) { $0 + $1.tools.count }
+        let serverNames = tools.map { $0.name }.joined(separator: ", ")
+        Logger.client.info("Refreshed MCP tools - Servers: \(tools.count), Total tools: \(totalToolsCount), Server names: [\(serverNames)]")
+
         self.availableMCPServerTools = tools
     }
 }

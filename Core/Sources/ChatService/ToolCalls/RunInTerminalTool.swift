@@ -4,7 +4,7 @@ import XcodeInspector
 import JSONRPC
 
 public class RunInTerminalTool: ICopilotTool {
-    public func invokeTool(_ request: InvokeClientToolRequest, completion: @escaping (AnyJSONRPCResponse) -> Void, chatHistoryUpdater: ChatHistoryUpdater?, contextProvider: (any ToolContextProvider)?) -> Bool {
+    public func invokeTool(_ request: InvokeClientToolRequest, completion: @escaping (AnyJSONRPCResponse) -> Void, contextProvider: (any ToolContextProvider)?) -> Bool {
         let params = request.params!
         
         Task {

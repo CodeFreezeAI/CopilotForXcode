@@ -36,6 +36,7 @@ extension NSAppearance {
 extension View {
     var messageBubbleCornerRadius: Double { 8 }
     var hoverableImageCornerRadius: Double { 4 }
+    var inputAreaTextEditorCornerRadius: Double { 12 }
 
     func codeBlockLabelStyle() -> some View {
         relativeLineSpacing(.em(0.225))
@@ -200,7 +201,7 @@ extension View {
 
 struct CodeReviewCardBackground: View {
     var body: some View {
-        RoundedRectangle(cornerRadius: 4)
+        RoundedRectangle(cornerRadius: 12)
             .stroke(.black.opacity(0.17), lineWidth: 1)
             .background(Color.gray.opacity(0.05))
     }
@@ -208,7 +209,7 @@ struct CodeReviewCardBackground: View {
 
 struct CodeReviewHeaderBackground: View {
     var body: some View {
-        RoundedRectangle(cornerRadius: 4)
+        RoundedRectangle(cornerRadius: 12)
             .stroke(.black.opacity(0.17), lineWidth: 1)
             .background(Color.gray.opacity(0.1))
     }

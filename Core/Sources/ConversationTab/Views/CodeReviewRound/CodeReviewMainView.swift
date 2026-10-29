@@ -38,56 +38,7 @@ struct CodeReviewMainView: View {
             .scaledFont(.system(size: chatFontSize))
     }
     
-    var statusIcon: some View {
-        Group {
-            switch round.status {
-            case .running:
-                ProgressView()
-                    .controlSize(.small)
-                    .frame(width: 16, height: 16)
-                    .scaledScaleEffect(0.7)
-            case .completed:
-                Image(systemName: "checkmark")
-                    .foregroundColor(.green)
-                    .scaledFont(.body)
-            case .error:
-                Image(systemName: "xmark.circle")
-                    .foregroundColor(.red)
-                    .scaledFont(.body)
-            case .cancelled:
-                Image(systemName: "slash.circle")
-                    .foregroundColor(.gray)
-                    .scaledFont(.body)
-            case .waitForConfirmation:
-                EmptyView()
-            case .accepted:
-                EmptyView()
-            }
-        }
-    }
-    
-    var statusView: some View {
-        Group {
-            switch round.status {
-            case .waitForConfirmation, .accepted:
-                EmptyView()
-            default:
-                HStack(spacing: 4) {
-                    statusIcon
-                        .scaledFrame(width: 16, height: 16)
-                    
-                    Text("Running Code Review...")
-                        .scaledFont(.system(size: chatFontSize))
-                        .foregroundColor(.secondary)
-                    
-                    Spacer()
-                }
-            }
-        }
-    }
-    
     var shouldShowHelloMessage: Bool { round.statusHistory.contains(.waitForConfirmation) }
-    var shouldShowRunningStatus: Bool { round.statusHistory.contains(.running) }
     
     var body: some View {
         WithPerceptionTracking {
@@ -103,10 +54,6 @@ struct CodeReviewMainView: View {
                         changedFileUris: changedFileUris,
                         selectedFileUris: $selectedFileUris
                     )
-                }
-                
-                if shouldShowRunningStatus {
-                    statusView
                 }
                 
                 if hasFileComments {

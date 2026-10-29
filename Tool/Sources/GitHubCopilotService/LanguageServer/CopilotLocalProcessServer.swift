@@ -1,4 +1,5 @@
 import Combine
+import ConversationServiceProvider
 import Foundation
 import JSONRPC
 import LanguageClient
@@ -29,12 +30,37 @@ public enum ServerError: LocalizedError {
                                        message: error.message,
                                        data: error.data)
     }
+    
+    static func decodingError(_ error: DecodingError) -> ServerError {
+        let message: String
+        
+        switch error {
+        case .typeMismatch(let type, let context):
+            message = "Type mismatch: Expected \(type). \(context.debugDescription)"
+            
+        case .valueNotFound(let type, let context):
+            message = "Value not found: Expected \(type). \(context.debugDescription)"
+            
+        case .keyNotFound(let key, let context):
+            message = "Key '\(key.stringValue)' not found. \(context.debugDescription)"
+            
+        case .dataCorrupted(let context):
+            message = "Data corrupted: \(context.debugDescription)"
+            
+        @unknown default:
+            message = error.localizedDescription
+        }
+        
+        return ServerError.serverError(code: -32700, message: message, data: nil)
+    }
 
     static func convertToServerError(error: any Error) -> ServerError {
         if let serverError = error as? ServerError {
             return serverError
         } else if let jsonRPCError = error as? AnyJSONRPCResponseError {
             return responseError(jsonRPCError)
+        } else if let decodeError = error as? DecodingError {
+            return decodingError(decodeError)
         }
         
         return .unknownError(error)
@@ -114,7 +140,7 @@ class CopilotLocalProcessServer {
             return
         }
 
-        if request.method == "getCompletionsCycling" {
+        if request.method == "getCompletionsCycling" || request.method == "textDocument/copilotInlineEdit" {
             Task { @MainActor [weak self] in
                 self?.ongoingCompletionRequestIDs.append(request.id)
             }
@@ -196,6 +222,24 @@ class CopilotLocalProcessServer {
             case "copilot/mcpRuntimeLogs":
                 notificationPublisher.send(anyNotification)
                 return true
+            case "policy/didChange":
+                notificationPublisher.send(anyNotification)
+                return true
+            case "$/copilot/compressionStarted":
+                notificationPublisher.send(anyNotification)
+                return true
+            case "$/copilot/compressionCompleted":
+                notificationPublisher.send(anyNotification)
+                return true
+            case "$/copilot/rateLimitWarning":
+                notificationPublisher.send(anyNotification)
+                return true
+            case "copilot/quotaChange":
+                notificationPublisher.send(anyNotification)
+                return true
+            case "copilot/quotaWarning":
+                notificationPublisher.send(anyNotification)
+                return true
             case "conversation/preconditionsNotification", "statusNotification":
                 // Ignore
                 return true
@@ -237,13 +281,17 @@ extension CopilotLocalProcessServer: ServerConnection {
         
         let method = notif.method.rawValue
         
-        switch notif {
-        case .copilotDidChangeWatchedFiles(let params):
-            do {
+        do {
+            switch notif {
+            case .copilotDidChangeWatchedFiles(let params):
                 try await server.sendNotification(params, method: method)
-            } catch {
-                throw ServerError.unableToSendNotification(error)
+            case .clientProtocolProgress(let params):
+                try await server.sendNotification(params, method: method)
+            case .textDocumentDidShowInlineEdit(let params):
+                try await server.sendNotification(params, method: method)
             }
+        } catch {
+            throw ServerError.unableToSendNotification(error)
         }
     }
 
@@ -321,14 +369,22 @@ public struct CopilotDidChangeWatchedFilesParams: Codable, Hashable {
 public enum CopilotClientNotification {
     public enum Method: String {
         case workspaceDidChangeWatchedFiles = "workspace/didChangeWatchedFiles"
+        case protocolProgress = "$/progress"
+        case textDocumentDidShowInlineEdit = "textDocument/didShowInlineEdit"
     }
     
     case copilotDidChangeWatchedFiles(CopilotDidChangeWatchedFilesParams)
+    case clientProtocolProgress(ProgressParams)
+    case textDocumentDidShowInlineEdit(TextDocumentDidShowInlineEditParams)
     
     public var method: Method {
         switch self {
         case .copilotDidChangeWatchedFiles:
             return .workspaceDidChangeWatchedFiles
+        case .clientProtocolProgress:
+            return .protocolProgress
+        case .textDocumentDidShowInlineEdit:
+            return .textDocumentDidShowInlineEdit
         }
     }
 }

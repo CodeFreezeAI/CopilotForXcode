@@ -10,8 +10,8 @@ struct MCPManualInstallView: View {
         VStack(spacing: 0) {
             DisclosureSettingsRow(
                 isExpanded: $isExpanded,
-                accessibilityLabel: { $0 ? "Collapse manual install section" : "Expand manual install section" },
-                title: { Text("Manual Install").font(.headline) },
+                accessibilityLabel: { $0 ? "Collapse MCP configuration section" : "Expand MCP configuration section" },
+                title: { Text("MCP Configuration").font(.headline) },
                 subtitle: { Text("Add MCP Servers to power AI with tools for files, databases, and external APIs.") },
                 actions: {
                     HStack(spacing: 8) {
@@ -55,7 +55,6 @@ struct MCPManualInstallView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 8) {
                         Text("Example Configuration").foregroundColor(.primary.opacity(0.85))
-
                         CopyButton(
                             copy: {
                                 NSPasteboard.general.clearContents()
@@ -76,15 +75,7 @@ struct MCPManualInstallView: View {
                 .transition(.opacity.combined(with: .scale(scale: 1, anchor: .top)))
             }
         }
-        .cornerRadius(12)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .inset(by: 0.5)
-                .stroke(SecondarySystemFillColor, lineWidth: 1)
-                .animation(.easeInOut(duration: 0.3), value: isExpanded)
-        )
-        .animation(.easeInOut(duration: 0.3), value: isExpanded)
+        .settingsContainerStyle(isExpanded: isExpanded)
     }
 
     var exampleConfig: String {
@@ -151,10 +142,4 @@ struct MCPManualInstallView: View {
         let url = URL(fileURLWithPath: mcpConfigFilePath)
         NSWorkspace.shared.open(url)
     }
-}
-
-#Preview {
-    MCPManualInstallView()
-        .padding()
-        .frame(width: 900)
 }

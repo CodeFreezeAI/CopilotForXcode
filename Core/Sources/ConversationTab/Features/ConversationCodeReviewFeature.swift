@@ -70,9 +70,11 @@ public struct ConversationCodeReviewFeature {
                                 "/bin/bash",
                                 arguments: [
                                     "-c",
-                                    "xed -l \(lineNumber+1) \"\(fileURL.path)\""
+                                    "xed -l \(lineNumber+1) \"${TARGET_REVIEW_FILE}\""
                                 ],
-                                environment: [:]
+                                environment: [
+                                    "TARGET_REVIEW_FILE": fileURL.path
+                                ]
                             )
                         } catch {
                             print(error)

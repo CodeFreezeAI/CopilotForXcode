@@ -12,6 +12,7 @@ import OrderedCollections
 import SwiftUI
 import GitHelper
 import SuggestionBasic
+import HostAppActivator
 
 public struct DisplayedChatMessage: Equatable {
     public enum Role: Equatable {
@@ -29,9 +30,18 @@ public struct DisplayedChatMessage: Equatable {
     public var suggestedTitle: String? = nil
     public var errorMessages: [String] = []
     public var steps: [ConversationProgressStep] = []
+    public var thinking: [MessageThinking] = []
     public var editAgentRounds: [AgentRound] = []
+    public var parentTurnId: String? = nil
     public var panelMessages: [CopilotShowMessageParams] = []
     public var codeReviewRound: CodeReviewRound? = nil
+    public var fileEdits: [FileEdit] = []
+    public var turnStatus: ChatMessage.TurnStatus? = nil
+    public let requestType: RequestType
+    public var modelName: String? = nil
+    public var modelProviderName: String? = nil
+    public var billingMultiplier: Float? = nil
+    public var reasoningEffort: String? = nil
 
     public init(
         id: String,
@@ -43,9 +53,18 @@ public struct DisplayedChatMessage: Equatable {
         suggestedTitle: String? = nil,
         errorMessages: [String] = [],
         steps: [ConversationProgressStep] = [],
+        thinking: [MessageThinking] = [],
         editAgentRounds: [AgentRound] = [],
+        parentTurnId: String? = nil,
         panelMessages: [CopilotShowMessageParams] = [],
-        codeReviewRound: CodeReviewRound? = nil
+        codeReviewRound: CodeReviewRound? = nil,
+        fileEdits: [FileEdit] = [],
+        turnStatus: ChatMessage.TurnStatus? = nil,
+        requestType: RequestType,
+        modelName: String? = nil,
+        modelProviderName: String? = nil,
+        billingMultiplier: Float? = nil,
+        reasoningEffort: String? = nil
     ) {
         self.id = id
         self.role = role
@@ -56,9 +75,18 @@ public struct DisplayedChatMessage: Equatable {
         self.suggestedTitle = suggestedTitle
         self.errorMessages = errorMessages
         self.steps = steps
+        self.thinking = thinking
         self.editAgentRounds = editAgentRounds
+        self.parentTurnId = parentTurnId
         self.panelMessages = panelMessages
         self.codeReviewRound = codeReviewRound
+        self.fileEdits = fileEdits
+        self.turnStatus = turnStatus
+        self.requestType = requestType
+        self.modelName = modelName
+        self.modelProviderName = modelProviderName
+        self.billingMultiplier = billingMultiplier
+        self.reasoningEffort = reasoningEffort
     }
 }
 
@@ -75,6 +103,10 @@ struct ChatContext: Equatable {
         self.typedMessage = typedMessage
         self.attachedReferences = attachedReferences
         self.attachedImages = attachedImages
+    }
+    
+    static func empty() -> ChatContext {
+        .init(typedMessage: "", attachedReferences: [], attachedImages: [])
     }
     
     static func from(_ message: DisplayedChatMessage, projectURL: URL) -> ChatContext {
@@ -147,45 +179,411 @@ struct ChatContextProvider: Equatable {
 @Reducer
 struct Chat {
     public typealias MessageID = String
-
-    @ObservableState
-    struct State: Equatable {
-        // Not use anymore. the title of history tab will get from chat tab info
-        // Keep this var as `ChatTabItemView` reference this
-        var title: String = "New Chat"
-        var chatContext: ChatContext = .init(typedMessage: "", attachedReferences: [], attachedImages: [])
-        var contextProvider: ChatContextProvider = .init()
-        var history: [DisplayedChatMessage] = []
-        var isReceivingMessage = false
-        var requestType: ChatService.RequestType? = nil
-        var chatMenu = ChatMenu.State()
-        var focusedField: Field?
-        var currentEditor: ConversationFileReference? = nil
-        var attachedReferences: [ConversationAttachedReference] {
-            chatContext.attachedReferences
-        }
-        var attachedImages: [ImageReference] {
-            chatContext.attachedImages
-        }
-        var typedMessage: String {
-            get { chatContext.typedMessage }
-            set { 
-                chatContext.typedMessage = newValue
-                // User typed in. Need to reset contextProvider
-                contextProvider.reset()
+    public enum EditorMode: Hashable {
+        case input // Default input mode
+        case editUserMessage(MessageID)
+        
+        var isDefault: Bool { self == .input }
+        
+        var isEditingUserMessage: Bool {
+            switch self {
+            case .input: false
+            case .editUserMessage: true
             }
         }
-        /// Cache the original content
-        var fileEditMap: OrderedDictionary<URL, FileEdit> = [:]
-        var diffViewerController: DiffViewWindowController? = nil
-        var isAgentMode: Bool = AppState.shared.isAgentModeEnabled()
-        var workspaceURL: URL? = nil
+        
+        var editingUserMessageId: String? {
+            switch self {
+            case .input: nil
+            case .editUserMessage(let messageID): messageID
+            }
+        }
+    }
+
+    @ObservableState
+    struct EditorState: Equatable {
         enum Field: String, Hashable {
             case textField
             case fileSearchBar
         }
         
         var codeReviewState = ConversationCodeReviewFeature.State()
+
+        var mode: EditorMode
+        var contexts: [EditorMode: ChatContext]
+        var contextProvider: ChatContextProvider
+        var focusedField: Field?
+        var currentEditor: ConversationFileReference?
+        var handOffClicked: Bool = false
+
+        init(
+            mode: EditorMode = .input,
+            contexts: [EditorMode: ChatContext] = [.input: .empty()],
+            contextProvider: ChatContextProvider = .init(),
+            focusedField: Field? = nil,
+            currentEditor: ConversationFileReference? = nil,
+            handOffClicked: Bool = false
+        ) {
+            self.mode = mode
+            self.contexts = contexts
+            self.contextProvider = contextProvider
+            self.focusedField = focusedField
+            self.currentEditor = currentEditor
+            self.handOffClicked = handOffClicked
+        }
+
+        func context(for mode: EditorMode) -> ChatContext {
+            contexts[mode] ?? .empty()
+        }
+
+        mutating func setContext(_ context: ChatContext, for mode: EditorMode) {
+            contexts[mode] = context
+        }
+
+        mutating func updateCurrentContext(_ update: (inout ChatContext) -> Void) {
+            var context = self.context(for: mode)
+            update(&context)
+            setContext(context, for: mode)
+        }
+
+        mutating func keepOnlyInputContext() {
+            let inputContext = context(for: .input)
+            contexts = [.input: inputContext]
+        }
+
+        mutating func clearAttachedImages() {
+            updateCurrentContext { $0.attachedImages.removeAll() }
+        }
+
+        mutating func addReference(_ reference: ConversationAttachedReference) {
+            updateCurrentContext { context in
+                guard !context.attachedReferences.contains(reference) else { return }
+                context.attachedReferences.append(reference)
+            }
+        }
+
+        mutating func removeReference(_ reference: ConversationAttachedReference) {
+            updateCurrentContext { context in
+                guard let index = context.attachedReferences.firstIndex(of: reference) else { return }
+                context.attachedReferences.remove(at: index)
+            }
+        }
+
+        mutating func addImage(_ image: ImageReference) {
+            updateCurrentContext { context in
+                guard !context.attachedImages.contains(image) else { return }
+                context.attachedImages.append(image)
+            }
+        }
+
+        mutating func removeImage(_ image: ImageReference) {
+            updateCurrentContext { context in
+                guard let index = context.attachedImages.firstIndex(of: image) else { return }
+                context.attachedImages.remove(at: index)
+            }
+        }
+
+        mutating func pushContext(_ context: ChatContext) {
+            contextProvider.pushContext(context)
+        }
+
+        mutating func resetContextProvider() {
+            contextProvider.reset()
+        }
+
+        mutating func popNextContext() -> ChatContext? {
+            contextProvider.getNextContext()
+        }
+
+        func previousContext(from history: [DisplayedChatMessage], projectURL: URL) -> ChatContext? {
+            contextProvider.getPreviousContext(from: history, projectURL: projectURL)
+        }
+    }
+
+    @ObservableState
+    struct ConversationState: Equatable {
+        var history: [DisplayedChatMessage]
+        var isReceivingMessage: Bool
+        var isSummarizingConversation: Bool
+        var requestType: RequestType?
+        var contextSizeInfo: ContextSizeInfo?
+
+        init(
+            history: [DisplayedChatMessage] = [],
+            isReceivingMessage: Bool = false,
+            isSummarizingConversation: Bool = false,
+            requestType: RequestType? = nil,
+            contextSizeInfo: ContextSizeInfo? = nil
+        ) {
+            self.history = history
+            self.isReceivingMessage = isReceivingMessage
+            self.isSummarizingConversation = isSummarizingConversation
+            self.requestType = requestType
+            self.contextSizeInfo = contextSizeInfo
+        }
+
+        func subsequentMessages(after messageId: MessageID) -> [DisplayedChatMessage] {
+            guard let index = history.firstIndex(where: { $0.id == messageId }) else {
+                return []
+            }
+            return Array(history[(index + 1)...])
+        }
+
+        func editUserMessageEffectedMessages(for mode: EditorMode) -> [DisplayedChatMessage] {
+            guard case .editUserMessage(let messageId) = mode else {
+                return []
+            }
+            return subsequentMessages(after: messageId)
+        }
+    }
+
+    struct AgentEditingState: Equatable {
+        var fileEditMap: OrderedDictionary<URL, FileEdit>
+        var diffViewerController: DiffViewWindowController?
+
+        init(
+            fileEditMap: OrderedDictionary<URL, FileEdit> = [:],
+            diffViewerController: DiffViewWindowController? = nil
+        ) {
+            self.fileEditMap = fileEditMap
+            self.diffViewerController = diffViewerController
+        }
+
+        static func == (lhs: AgentEditingState, rhs: AgentEditingState) -> Bool {
+            lhs.fileEditMap == rhs.fileEditMap && lhs.diffViewerController === rhs.diffViewerController
+        }
+    }
+
+    struct EnvironmentState: Equatable {
+        var isAgentMode: Bool
+        var workspaceURL: URL?
+        var selectedAgent: ConversationMode
+
+        init(
+            isAgentMode: Bool = AppState.shared.isAgentModeEnabled(),
+            workspaceURL: URL? = nil,
+            selectedAgent: ConversationMode = .defaultAgent
+        ) {
+            self.isAgentMode = isAgentMode
+            self.workspaceURL = workspaceURL
+            self.selectedAgent = selectedAgent
+        }
+    }
+
+    @ObservableState
+    struct State: Equatable {
+        typealias Field = EditorState.Field
+
+        // Not use anymore. the title of history tab will get from chat tab info
+        // Keep this var as `ChatTabItemView` reference this
+        var title: String
+        var editor: EditorState
+        var conversation: ConversationState
+        var agentEditing: AgentEditingState
+        var environment: EnvironmentState
+        var chatMenu: ChatMenu.State
+        var codeReviewState: ConversationCodeReviewFeature.State
+
+        init(
+            title: String = "New Chat",
+            editor: EditorState = .init(),
+            conversation: ConversationState = .init(),
+            agentEditing: AgentEditingState = .init(),
+            environment: EnvironmentState = .init(),
+            chatMenu: ChatMenu.State = .init(),
+            codeReviewState: ConversationCodeReviewFeature.State = .init()
+        ) {
+            self.title = title
+            self.editor = editor
+            self.conversation = conversation
+            self.agentEditing = agentEditing
+            self.environment = environment
+            self.chatMenu = chatMenu
+            self.codeReviewState = codeReviewState
+        }
+
+        init(
+            title: String = "New Chat",
+            editorMode: EditorMode = .input,
+            editorModeContexts: [EditorMode: ChatContext] = [.input: .empty()],
+            focusedField: Field? = nil,
+            history: [DisplayedChatMessage] = [],
+            isReceivingMessage: Bool = false,
+            requestType: RequestType? = nil,
+            fileEditMap: OrderedDictionary<URL, FileEdit> = [:],
+            diffViewerController: DiffViewWindowController? = nil,
+            isAgentMode: Bool = AppState.shared.isAgentModeEnabled(),
+            workspaceURL: URL? = nil,
+            selectedAgent: ConversationMode = .defaultAgent,
+            chatMenu: ChatMenu.State = .init(),
+            codeReviewState: ConversationCodeReviewFeature.State = .init()
+        ) {
+            self.init(
+                title: title,
+                editor: EditorState(
+                    mode: editorMode,
+                    contexts: editorModeContexts,
+                    focusedField: focusedField
+                ),
+                conversation: ConversationState(
+                    history: history,
+                    isReceivingMessage: isReceivingMessage,
+                    requestType: requestType
+                ),
+                agentEditing: AgentEditingState(
+                    fileEditMap: fileEditMap,
+                    diffViewerController: diffViewerController
+                ),
+                environment: EnvironmentState(
+                    isAgentMode: isAgentMode,
+                    workspaceURL: workspaceURL,
+                    selectedAgent: selectedAgent
+                ),
+                chatMenu: chatMenu,
+                codeReviewState: codeReviewState
+            )
+        }
+
+        var editorMode: EditorMode {
+            get { editor.mode }
+            set {
+                editor.mode = newValue
+                if editor.contexts[newValue] == nil {
+                    editor.contexts[newValue] = .empty()
+                }
+            }
+        }
+
+        var chatContext: ChatContext {
+            get { editor.context(for: editor.mode) }
+            set { editor.setContext(newValue, for: editor.mode) }
+        }
+
+        var history: [DisplayedChatMessage] {
+            get { conversation.history }
+            set { conversation.history = newValue }
+        }
+
+        var isReceivingMessage: Bool {
+            get { conversation.isReceivingMessage }
+            set { conversation.isReceivingMessage = newValue }
+        }
+
+        var isSummarizingConversation: Bool {
+            get { conversation.isSummarizingConversation }
+            set { conversation.isSummarizingConversation = newValue }
+        }
+
+        var requestType: RequestType? {
+            get { conversation.requestType }
+            set { conversation.requestType = newValue }
+        }
+
+        var contextSizeInfo: ContextSizeInfo? {
+            get { conversation.contextSizeInfo }
+            set { conversation.contextSizeInfo = newValue }
+        }
+
+        var handOffClicked: Bool {
+            get { editor.handOffClicked }
+            set { editor.handOffClicked = newValue }
+        }
+
+        var focusedField: Field? {
+            get { editor.focusedField }
+            set { editor.focusedField = newValue }
+        }
+
+        var currentEditor: ConversationFileReference? {
+            get { editor.currentEditor }
+            set { editor.currentEditor = newValue }
+        }
+
+        var attachedReferences: [ConversationAttachedReference] {
+            chatContext.attachedReferences
+        }
+
+        var attachedImages: [ImageReference] {
+            chatContext.attachedImages
+        }
+
+        var typedMessage: String {
+            get { chatContext.typedMessage }
+            set {
+                editor.updateCurrentContext { $0.typedMessage = newValue }
+                editor.resetContextProvider()
+            }
+        }
+
+        var fileEditMap: OrderedDictionary<URL, FileEdit> {
+            get { agentEditing.fileEditMap }
+            set { agentEditing.fileEditMap = newValue }
+        }
+
+        var diffViewerController: DiffViewWindowController? {
+            get { agentEditing.diffViewerController }
+            set { agentEditing.diffViewerController = newValue }
+        }
+
+        var isAgentMode: Bool {
+            get { environment.isAgentMode }
+            set { environment.isAgentMode = newValue }
+        }
+
+        var workspaceURL: URL? {
+            get { environment.workspaceURL }
+            set { environment.workspaceURL = newValue }
+        }
+
+        var selectedAgent: ConversationMode {
+            get { environment.selectedAgent }
+            set { environment.selectedAgent = newValue }
+        }
+
+        /// Not including the one being edited
+        var editUserMessageEffectedMessages: [DisplayedChatMessage] {
+            conversation.editUserMessageEffectedMessages(for: editor.mode)
+        }
+        
+        // The following messages after check point message will hide on ChatPanel
+        var pendingCheckpointMessageId: String? = nil
+        // The chat context before the first restoring
+        var pendingCheckpointContext: ChatContext? = nil
+        var messagesAfterCheckpoint: [DisplayedChatMessage] {
+            guard let pendingCheckpointMessageId, let index = history.firstIndex(where: { $0.id == pendingCheckpointMessageId }) else {
+                return []
+            }
+            
+            let nextIndex = index + 1
+            guard nextIndex < history.count else {
+                return []
+            }
+            
+            // The order matters for restoring / redoing file edits
+            return Array(history[nextIndex...])
+        }
+        
+        func getMessages(after afterMessageId: String, through throughMessageId: String?) -> [DisplayedChatMessage] {
+            guard let afterMessageIdIndex = history.firstIndex(where: { $0.id == afterMessageId }) else {
+                return []
+            }
+            
+            let startIndex = afterMessageIdIndex + 1
+            
+            let endIndex: Int
+            if let throughMessageId = throughMessageId,
+               let throughMessageIdIndex = history.firstIndex(where: { $0.id == throughMessageId }) {
+                endIndex = throughMessageIdIndex + 1
+            } else {
+                endIndex = history.count
+            }
+            
+            guard startIndex < endIndex, startIndex < history.count else {
+                return []
+            }
+            
+            return Array(history[startIndex..<endIndex])
+        }
     }
 
     enum Action: Equatable, BindableAction {
@@ -195,6 +593,8 @@ struct Chat {
         case refresh
         case sendButtonTapped(String)
         case returnButtonTapped
+        case updateTypedMessage(String)
+        case setEditorMode(EditorMode)
         case stopRespondingButtonTapped
         case clearButtonTap
         case deleteMessageButtonTapped(MessageID)
@@ -207,6 +607,7 @@ struct Chat {
         case copyCode(MessageID)
         case insertCode(String)
         case toolCallAccepted(String)
+        case toolCallAcceptedWithApproval(String, ToolAutoApprovalManager.AutoApproval?)
         case toolCallCompleted(String, String)
         case toolCallCancelled(String)
 
@@ -214,10 +615,12 @@ struct Chat {
         case observeHistoryChange
         case observeIsReceivingMessageChange
         case observeFileEditChange
+        case observeContextSizeInfoChange
 
         case historyChanged
         case isReceivingMessageChanged
         case fileEditChanged
+        case contextSizeInfoChanged
 
         case chatMenu(ChatMenu.Action)
         
@@ -232,6 +635,7 @@ struct Chat {
         case removeSelectedImage(ImageReference)
         
         case followUpButtonClicked(String, String)
+        case handOffButtonClicked(HandOff)
         
         // Agent File Edit
         case undoEdits(fileURLs: [URL])
@@ -242,6 +646,7 @@ struct Chat {
         case setDiffViewerController(chat: StoreOf<Chat>)
 
         case agentModeChanged(Bool)
+        case selectedAgentChanged(ConversationMode)
         
         // Code Review
         case codeReview(ConversationCodeReviewFeature.Action)
@@ -254,6 +659,15 @@ struct Chat {
         // External Action
         case observeFixErrorNotification
         case fixEditorErrorIssue(EditorErrorIssue)
+        
+        // Check Point
+        case restoreCheckPoint(String)
+        case restoreFileEdits
+        case undoCheckPoint // Revert the restore
+        case discardCheckPoint
+        case reloadWorkingset(DisplayedChatMessage)
+
+        case openAutoApproveSettings
     }
 
     let service: ChatService
@@ -264,6 +678,7 @@ struct Chat {
         case observeIsReceivingMessageChange(UUID)
         case sendMessage(UUID)
         case observeFileEditChange(UUID)
+        case observeContextSizeInfoChange(UUID)
         case observeFixErrorNotification(UUID)
     }
 
@@ -293,11 +708,23 @@ struct Chat {
                     await send(.focusOnTextField)
                     await send(.refresh)
                     await send(.observeFixErrorNotification)
-                    
+
+                    let selectedAgentSubModeId = AppState.shared.getSelectedAgentSubMode()
+                    if let modes = await SharedChatService.shared.loadConversationModes(),
+                       let currentMode = modes.first(where: { $0.id == selectedAgentSubModeId }) {
+                        await send(.selectedAgentChanged(currentMode))
+                    }
+
                     let publisher = NotificationCenter.default.publisher(for: .gitHubCopilotChatModeDidChange)
                     for await _ in publisher.values {
                         let isAgentMode = AppState.shared.isAgentModeEnabled()
                         await send(.agentModeChanged(isAgentMode))
+
+                        let selectedAgentSubModeId = AppState.shared.getSelectedAgentSubMode()
+                        if let modes = await SharedChatService.shared.loadConversationModes(),
+                           let currentMode = modes.first(where: { $0.id == selectedAgentSubModeId }) {
+                            await send(.selectedAgentChanged(currentMode))
+                        }
                     }
                 }
 
@@ -318,17 +745,33 @@ struct Chat {
                 let selectedModelFamily = selectedModel?.modelFamily ?? CopilotModelManager.getDefaultChatModel(
                     scope: AppState.shared.modelScope()
                 )?.modelFamily
+                let reasoningEffort = selectedModel.flatMap { AppState.shared.effectiveReasoningEffort(for: $0) }
                 let agentMode = AppState.shared.isAgentModeEnabled()
+                let selectedAgentSubMode = AppState.shared.getSelectedAgentSubMode()
                 let shouldAttachImages = selectedModel?.supportVision ?? CopilotModelManager.getDefaultChatModel(
                     scope: AppState.shared.modelScope()
                 )?.supportVision ?? false
                 let attachedImages: [ImageReference] = shouldAttachImages ? state.attachedImages : []
 
                 let references = state.attachedReferences
-                state.chatContext.attachedImages = []
+                state.editor.clearAttachedImages()
+                
+                let toDeleteMessageIds: [String] = {
+                    var messageIds: [String] = []
+                    if state.editorMode.isEditingUserMessage {
+                        messageIds.append(contentsOf: state.editUserMessageEffectedMessages.map { $0.id })
+                        if let editingUserMessageId = state.editorMode.editingUserMessageId {
+                            messageIds.append(editingUserMessageId)
+                        }
+                    }
+                    return messageIds
+                }()
                 
                 return .run { send in
                     await send(.resetContextProvider)
+                    await send(.discardCheckPoint)
+                    await service.deleteMessages(ids: toDeleteMessageIds)
+                    await send(.setEditorMode(.input))
                     
                     try await service
                         .send(
@@ -339,7 +782,9 @@ struct Chat {
                             references: references,
                             model: selectedModelFamily,
                             modelProviderName: selectedModel?.providerName,
+                            reasoningEffort: reasoningEffort,
                             agentMode: agentMode,
+                            customChatModeId: selectedAgentSubMode,
                             userLanguage: chatResponseLocale
                         )
                 }.cancellable(id: CancelID.sendMessage(self.id))
@@ -349,6 +794,17 @@ struct Chat {
                 return .run { _ in
                     service.updateToolCallStatus(toolCallId: toolCallId, status: .accepted)
                 }.cancellable(id: CancelID.sendMessage(self.id))
+
+            case let .toolCallAcceptedWithApproval(toolCallId, approval):
+                guard !toolCallId.isEmpty else { return .none }
+                return .run { send in
+                    if let approval {
+                        await ToolAutoApprovalManager.shared.approve(approval)
+                    }
+
+                    await send(.toolCallAccepted(toolCallId))
+                }.cancellable(id: CancelID.sendMessage(self.id))
+
             case let .toolCallCancelled(toolCallId):
                 guard !toolCallId.isEmpty else { return .none }
                 return .run { _ in
@@ -372,9 +828,11 @@ struct Chat {
                 )?.modelFamily
                 let references = state.attachedReferences
                 let agentMode = AppState.shared.isAgentModeEnabled()
+                let selectedAgentSubMode = AppState.shared.getSelectedAgentSubMode()
                 
                 return .run { send in
                     await send(.resetContextProvider)
+                    await send(.discardCheckPoint)
 
                     try await service
                         .send(
@@ -384,13 +842,72 @@ struct Chat {
                             references: references,
                             model: selectedModelFamily,
                             modelProviderName: selectedModel?.providerName,
+                            reasoningEffort: selectedModel.flatMap { AppState.shared.effectiveReasoningEffort(for: $0) },
                             agentMode: agentMode,
+                            customChatModeId: selectedAgentSubMode,
                             userLanguage: chatResponseLocale
                         )
                 }.cancellable(id: CancelID.sendMessage(self.id))
+            
+            case let .handOffButtonClicked(handOff):
+                state.handOffClicked = true
+                let agent = handOff.agent
+                let prompt = handOff.prompt
+                let shouldSend = handOff.send ?? false
+                
+                return .run { send in
+                    // Find and switch to the target agent
+                    let modes = await SharedChatService.shared.loadConversationModes() ?? []
+                    if let targetAgent = modes.first(where: { $0.name.lowercased() == agent.lowercased() }) {
+                        await send(.selectedAgentChanged(targetAgent))
+                    }
+                    
+                    // If send is true, send the prompt message
+                    if shouldSend && !prompt.isEmpty {
+                        await send(.updateTypedMessage(prompt))
+                        let id = UUID().uuidString
+                        await send(.sendButtonTapped(id))
+                    } else if !prompt.isEmpty {
+                        // Just populate the message field
+                        await send(.updateTypedMessage(prompt))
+                    }
+                }
 
             case .returnButtonTapped:
                 state.typedMessage += "\n"
+                return .none
+                
+            case let .updateTypedMessage(message):
+                state.typedMessage = message
+                return .none
+                
+            case let .setEditorMode(mode):
+                
+                switch mode {
+                case .input:
+                    state.editorMode = mode
+                    // remove all edit contexts except input mode
+                    state.editor.keepOnlyInputContext()
+                case .editUserMessage(let messageID):
+                    guard let message = state.history.first(where: { $0.id == messageID }),
+                          message.role == .user,
+                          let projectURL = service.getProjectRootURL()
+                    else {
+                        return .none
+                    }
+                    
+                    let chatContext: ChatContext = .from(message, projectURL: projectURL)
+                    state.editor.setContext(chatContext, for: mode)
+                    state.editorMode = mode
+                    let isReceivingMessage = service.isReceivingMessage
+                    
+                    return .run { send in
+                        if isReceivingMessage {
+                            await send(.stopRespondingButtonTapped)
+                        }
+                    }
+                }
+                
                 return .none
 
             case .stopRespondingButtonTapped:
@@ -408,7 +925,7 @@ struct Chat {
 
             case let .deleteMessageButtonTapped(id):
                 return .run { _ in
-                    await service.deleteMessage(id: id)
+                    await service.deleteMessages(ids: [id])
                 }
 
             case let .resendMessageButtonTapped(id):
@@ -433,9 +950,11 @@ struct Chat {
                                 "/bin/bash",
                                 arguments: [
                                     "-c",
-                                    "xed -l 0 \"\(reference.filePath)\"",
+                                    "xed -l 0 \"${TARGET_CHAT_FILE}\"",
                                 ],
-                                environment: [:]
+                                environment: [
+                                    "TARGET_CHAT_FILE": reference.filePath
+                                ]
                             )
                         } catch {
                             print(error)
@@ -454,6 +973,7 @@ struct Chat {
                     await send(.observeHistoryChange)
                     await send(.observeIsReceivingMessageChange)
                     await send(.observeFileEditChange)
+                    await send(.observeContextSizeInfoChange)
                 }
 
             case .observeHistoryChange:
@@ -479,6 +999,7 @@ struct Chat {
                 return .run { send in
                     let stream = AsyncStream<Void> { continuation in
                         let cancellable = service.$isReceivingMessage
+                            .merge(with: service.$isSummarizingConversation)
                             .sink { _ in
                                 continuation.yield()
                             }
@@ -513,6 +1034,25 @@ struct Chat {
                     cancelInFlight: true
                 )
 
+            case .observeContextSizeInfoChange:
+                return .run { send in
+                    let stream = AsyncStream<Void> { continuation in
+                        let cancellable = service.$contextSizeInfo
+                            .sink { _ in
+                                continuation.yield()
+                            }
+                        continuation.onTermination = { _ in
+                            cancellable.cancel()
+                        }
+                    }
+                    for await _ in stream {
+                        await send(.contextSizeInfoChanged)
+                    }
+                }.cancellable(
+                    id: CancelID.observeContextSizeInfoChange(id),
+                    cancelInFlight: true
+                )
+
             case .historyChanged:
                 state.history = service.chatHistory.flatMap { message in
                     var all = [DisplayedChatMessage]()
@@ -539,9 +1079,18 @@ struct Chat {
                         suggestedTitle: message.suggestedTitle,
                         errorMessages: message.errorMessages,
                         steps: message.steps,
+                        thinking: message.thinking,
                         editAgentRounds: message.editAgentRounds,
+                        parentTurnId: message.parentTurnId,
                         panelMessages: message.panelMessages,
-                        codeReviewRound: message.codeReviewRound
+                        codeReviewRound: message.codeReviewRound,
+                        fileEdits: message.fileEdits,
+                        turnStatus: message.turnStatus,
+                        requestType: message.requestType,
+                        modelName: message.modelName,
+                        modelProviderName: message.modelProviderName,
+                        billingMultiplier: message.billingMultiplier,
+                        reasoningEffort: message.reasoningEffort
                     ))
 
                     return all
@@ -551,9 +1100,14 @@ struct Chat {
 
             case .isReceivingMessageChanged:
                 state.isReceivingMessage = service.isReceivingMessage
+                state.isSummarizingConversation = service.isSummarizingConversation
                 state.requestType = service.requestType
                 return .none
-                
+
+            case .contextSizeInfoChanged:
+                state.conversation.contextSizeInfo = service.contextSizeInfo
+                return .none
+
             case .fileEditChanged:
                 state.fileEditMap = service.fileEditMap
                 let fileEditMap = state.fileEditMap
@@ -620,27 +1174,21 @@ struct Chat {
                 state.currentEditor = fileReference
                 return .none
             case let .addReference(ref):
-                guard !state.chatContext.attachedReferences.contains(ref) else { 
-                    return .none
-                }
-                state.chatContext.attachedReferences.append(ref)
+                state.editor.addReference(ref)
                 return .none
                 
             case let .removeReference(ref):
-                guard let index = state.chatContext.attachedReferences.firstIndex(of: ref) else {
-                    return .none
-                }
-                state.chatContext.attachedReferences.remove(at: index)
+                state.editor.removeReference(ref)
                 return .none
                 
             // MARK: - Image Context
             case let .addSelectedImage(imageReference):
                 guard !state.attachedImages.contains(imageReference) else { return .none }
-                state.chatContext.attachedImages.append(imageReference)
+                state.editor.addImage(imageReference)
                 return .run { send in await send(.resetContextProvider) }
             case let .removeSelectedImage(imageReference):
-                guard let index = state.attachedImages.firstIndex(of: imageReference) else { return .none }
-                state.chatContext.attachedImages.remove(at: index)
+                guard let _ = state.attachedImages.firstIndex(of: imageReference) else { return .none }
+                state.editor.removeImage(imageReference)
                 return .run { send in await send(.resetContextProvider) }
                 
             // MARK: - Agent Edits
@@ -690,13 +1238,24 @@ struct Chat {
             case let .agentModeChanged(isAgentMode):
                 state.isAgentMode = isAgentMode
                 return .none
+
+            case let .selectedAgentChanged(mode):
+                state.selectedAgent = mode
+                state.handOffClicked = false
+                return .none
+
+            // MARK: - Code Review
+            case .codeReview(.request(_)):
+                return .run { send in
+                    await send(.discardCheckPoint)
+                }
                 
             case .codeReview:
                 return .none
                 
             // MARK: Chat Context
             case .reloadNextContext:
-                guard let context = state.contextProvider.getNextContext() else {
+                guard let context = state.editor.popNextContext() else {
                     return .none
                 }
                 
@@ -708,7 +1267,7 @@ struct Chat {
                 
             case .reloadPreviousContext:
                 guard let projectURL = service.getProjectRootURL(),
-                      let context = state.contextProvider.getPreviousContext(
+                      let context = state.editor.previousContext(
                         from: state.history,
                         projectURL: projectURL) 
                 else {
@@ -717,14 +1276,14 @@ struct Chat {
                 
                 let currentContext = state.chatContext
                 state.chatContext = context
-                state.contextProvider.pushContext(currentContext)
+                state.editor.pushContext(currentContext)
                 
                 return .run { send in
                     await send(.focusOnTextField)
                 }
                 
             case .resetContextProvider:
-                state.contextProvider.reset()
+                state.editor.resetContextProvider()
                 return .none
 
             // MARK: - External action
@@ -777,8 +1336,10 @@ struct Chat {
                     scope: AppState.shared.modelScope()
                 )?.modelFamily
                 let agentMode = AppState.shared.isAgentModeEnabled()
+                // TODO: if we need to switch to agent mode or keep the current mode
+                let selectedAgentSubMode = AppState.shared.getSelectedAgentSubMode()
                 
-                return .run { _ in 
+                return .run { _ in
                     try await service.send(
                         UUID().uuidString,
                         content: message,
@@ -786,10 +1347,155 @@ struct Chat {
                         references: references,
                         model: selectedModelFamily,
                         modelProviderName: selectedModel?.providerName,
+                        reasoningEffort: selectedModel.flatMap { AppState.shared.effectiveReasoningEffort(for: $0) },
                         agentMode: agentMode,
+                        customChatModeId: selectedAgentSubMode,
                         userLanguage: chatResponseLocale
                     )
                 }.cancellable(id: CancelID.sendMessage(self.id))
+                
+            // MARK: - Check Point
+            
+            case let .restoreCheckPoint(messageId):
+                guard let message = state.history.first(where: { $0.id == messageId }) else {
+                    return .none
+                }
+                
+                if state.pendingCheckpointContext == nil {
+                    state.pendingCheckpointContext = state.chatContext
+                }
+                state.pendingCheckpointMessageId = messageId
+                
+                // Reload the chat context
+                let messagesAfterCheckpoint = state.messagesAfterCheckpoint
+                if !messagesAfterCheckpoint.isEmpty,
+                   let userMessage = messagesAfterCheckpoint.first,
+                   userMessage.role == .user,
+                   let projectURL = service.getProjectRootURL()
+                {
+                    state.chatContext = .from(userMessage, projectURL: projectURL)
+                }
+                
+                let isReceivingMessage = state.isReceivingMessage
+                return .run { send in
+                    await send(.restoreFileEdits)
+                    await send(.reloadWorkingset(message))
+                    if isReceivingMessage {
+                        await send(.stopRespondingButtonTapped)
+                    }
+                }
+                
+            case .restoreFileEdits:
+                // Revert file edits in messages after checkpoint
+                let messagesAfterCheckpoint = state.messagesAfterCheckpoint
+                guard !messagesAfterCheckpoint.isEmpty else {
+                    return .none
+                }
+                
+                return .run { _ in 
+                    var restoredURLs = Set<URL>()
+                    let fileManager = FileManager.default
+                    
+                    // Revert the file edit. From the oldest to newest
+                    for message in messagesAfterCheckpoint {
+                        let fileEdits = message.fileEdits
+                        guard !fileEdits.isEmpty else {
+                            continue
+                        }
+                        
+                        for fileEdit in fileEdits {
+                            guard !restoredURLs.contains(fileEdit.fileURL) else {
+                                continue
+                            }
+                            restoredURLs.insert(fileEdit.fileURL)
+                            
+                            do {
+                                switch fileEdit.toolName {
+                                case .createFile:
+                                    try fileManager.removeItem(at: fileEdit.fileURL)
+                                case .insertEditIntoFile:
+                                    try fileEdit.originalContent.write(to: fileEdit.fileURL, atomically: true, encoding: .utf8)
+                                default:
+                                    break
+                                }
+                            } catch {
+                                Logger.client.error(">>> Failed to restore file Edit: \(error)")
+                            }
+                        }
+                    }
+                }
+                
+            case .undoCheckPoint:
+                if let context = state.pendingCheckpointContext {
+                    state.chatContext = context
+                    state.pendingCheckpointContext = nil
+                }
+                let reversedMessagesAfterCheckpoint = Array(state.messagesAfterCheckpoint.reversed())
+                
+                state.pendingCheckpointMessageId = nil
+                
+                // Redo file edits in messages after checkpoint
+                guard !reversedMessagesAfterCheckpoint.isEmpty else {
+                    return .none
+                }
+                
+                return .run { send in 
+                    var redoedURL = Set<URL>()
+                    let lastMessage = reversedMessagesAfterCheckpoint.first
+                    
+                    for message in reversedMessagesAfterCheckpoint {
+                        let fileEdits = message.fileEdits
+                        guard !fileEdits.isEmpty else {
+                            continue
+                        }
+                        
+                        for fileEdit in fileEdits {
+                            guard !redoedURL.contains(fileEdit.fileURL) else {
+                                continue
+                            }
+                            redoedURL.insert(fileEdit.fileURL)
+                            
+                            do {
+                                switch fileEdit.toolName {
+                                case .createFile, .insertEditIntoFile:
+                                    try fileEdit.modifiedContent.write(to: fileEdit.fileURL, atomically: true, encoding: .utf8)
+                                default:
+                                    break
+                                }
+                            } catch {
+                                Logger.client.error(">>> failed to undo fileEdit: \(error)")
+                            }
+                        }
+                    }
+                    
+                    // Recover fileEdits working set
+                    if let lastMessage {
+                        await send(.reloadWorkingset(lastMessage))
+                    }
+                }
+                
+            case .discardCheckPoint:                
+                let messagesAfterCheckpoint = state.messagesAfterCheckpoint
+                state.pendingCheckpointMessageId = nil
+                state.pendingCheckpointContext = nil
+                return .run { _ in 
+                    if !messagesAfterCheckpoint.isEmpty {
+                        await service.deleteMessages(ids: messagesAfterCheckpoint.map { $0.id })
+                    }
+                }
+                
+            case let .reloadWorkingset(message):
+                return .run { _ in 
+                    service.resetFileEdits()
+                    for fileEdit in message.fileEdits {
+                        service.updateFileEdits(by: fileEdit)
+                    }
+                }
+
+            case .openAutoApproveSettings:
+                return .run { _ in
+                    try launchHostAppToolsSettingsAutoApprove()
+                }
             }
         }
     }

@@ -12,6 +12,8 @@ common issues:
    - [Extension Permission](#extension-permission) - Allows GitHub Copilot to integrate with Xcode
    - [Accessibility Permission](#accessibility-permission) - Enables real-time code suggestions
    - [Background Permission](#background-permission) - Allows extension to connect with host app
+   - [Files & Folders Permission](#files--folders-permission) - Allows GitHub Copilot for Xcode to access files and folders
+   - [Screen & System Audio Recording Permission](#screen--system-audio-recording-permission-optional) (Optional) - Allow GitHub Copilot for Xcode to capture screen when using Copilot Vision
 
    Please note that GitHub Copilot for Xcode may not work properly if any necessary permissions are missing.
 
@@ -30,7 +32,8 @@ Or you can navigate to the permission manually depending on your OS version:
 
 | macOS | Location |
 | :--- | :--- |
-| 15 | System Settings > General > Login Items > Extensions > Xcode Source Editor |
+| 26 | System Settings > General > Login Items & Extensions > Extensions > By Category > Xcode Source Editor |
+| 15 | System Settings > General > Login Items & Extensions > Extensions > Xcode Source Editor |
 | 13 & 14 | System Settings > Privacy & Security  > Extensions > Xcode Source Editor |
 | 12 | System Preferences > Extensions |
 
@@ -74,15 +77,57 @@ Please ensure that this permission is enabled. You can manually navigate to the 
 
 | macOS | Location |
 | :--- | :--- |
+| 26 | System Settings > General > Login Items & Extensions > App Background Activity |
 | 15 | System Settings > General > Login Items & Extensions > Allow in the Background |
 | 13 & 14 | System Settings > General > Login Items > Allow in the Background |
 
 Ensure that "GitHub Copilot for Xcode" is enabled in the list of allowed background items. Without this permission, the extension may not be able to properly communicate with the host app, which can result in inconsistent behavior or reduced functionality.
 
+## Files & Folders Permission
+
+GitHub Copilot for Xcode needs permission to read your project’s files so it can:
+
+- Use actual file contents as contextual grounding when you ask questions in Ask and Agent mode (instead of generic language-only answers)
+- Safely apply or preview multi-file edits in Agent modes (e.g. refactors, adding tests, updating related types)
+- Improve precision by leveraging nearby code, patterns, and naming conventions
+
+<p align="center">
+     <img alt="Files & Folders Permission" src="./Docs/Images/document-folder-permission-request.png" width="400" />
+</p>
+
+When first prompted macOS shows a dialog asking to allow access to folders. Click "Allow". 
+If you clicked "Don't Allow" or nothing appears:
+
+| macOS | Location |
+| :--- | :--- |
+| 13 & 14 & 15 & 26 | System Settings > Privacy & Security > Files and Folders |
+| 12 | System Preferences > Security & Privacy > Privacy > Files and Folders |
+
+In the list, expand `GitHub Copilot for Xcode` and enable the toggles for any relevant locations (e.g. “Documents” if your repositories live there). If your code is elsewhere (e.g. `~/Developer`), macOS may instead prompt dynamically the next time Copilot tries to read those paths—accept when prompted.
+
+## Screen & System Audio Recording Permission (Optional)
+
+This permission is only needed if you choose to use Copilot Vision (screen-based context capture).
+
+Copilot does NOT require screen recording for standard inline suggestions, chat, or agent operations.
+
+<p align="center">
+     <img alt="Screen & System Audio Recording Permission" src="./Docs/Images/screen-record-permission-request.png" width="400" />
+</p>
+
+This permission is typically granted automatically when you first use Copilot Vision and try to capture screen in GitHub Copilot for Xcode. You can also manually navigate to the background permission setting based on your macOS version:
+
+| macOS | Location |
+| :--- | :--- |
+| 14 & 15 & 26 | System Settings > Privacy & Security > Screen & System Audio Recording |
+| 13 | System Settings > Privacy & Security > Screen Recording |
+| 12 | System Preferences > Security & Privacy > Privacy > Screen Recording |
+
+Check `GitHub Copilot for Xcode` and restart the app.
 
 ## Logs
 
-Logs can be found in `~/Library/Logs/GitHubCopilot/` the most recent log file
+Logs can be found in `~/Library/Logs/GitHubCopilot/`. The most recent log file
 is:
 
 ```

@@ -166,6 +166,10 @@ public extension UserDefaultPreferenceKeys {
     var realtimeSuggestionToggle: PreferenceKey<Bool> {
         .init(defaultValue: true, key: "RealtimeSuggestionToggle")
     }
+    
+    var realtimeNESToggle: PreferenceKey<Bool> {
+        .init(defaultValue: true, key: "RealtimeNESToggle")
+    }
 
     var suggestionDisplayCompactMode: PreferenceKey<Bool> {
         .init(defaultValue: true, key: "SuggestionDisplayCompactMode")
@@ -308,6 +312,10 @@ public extension UserDefaultPreferenceKeys {
     var chatResponseLocale: PreferenceKey<String> {
         .init(defaultValue: "en", key: "ChatResponseLocale")
     }
+    
+    var agentMaxToolCallingLoop: PreferenceKey<Int> {
+        .init(defaultValue: 25, key: "AgentMaxToolCallingLoop")
+    }
 
     var globalCopilotInstructions: PreferenceKey<String> {
         .init(defaultValue: "", key: "GlobalCopilotInstructions")
@@ -319,6 +327,18 @@ public extension UserDefaultPreferenceKeys {
     
     var enableFixError: PreferenceKey<Bool> {
         .init(defaultValue: true, key: "EnableFixError")
+    }
+    
+    var suppressRestoreCheckpointConfirmation: PreferenceKey<Bool> {
+        .init(defaultValue: false, key: "SuppressRestoreCheckpointConfirmation")
+    }
+    
+    var enableSubagent: PreferenceKey<Bool> {
+        .init(defaultValue: true, key: "EnableSubagent")
+    }
+
+    var autoCompress: PreferenceKey<Bool> {
+        .init(defaultValue: true, key: "AutoCompress")
     }
 }
 
@@ -598,5 +618,37 @@ public extension UserDefaultPreferenceKeys {
     
     var currentUserName: PreferenceKey<String> {
         .init(defaultValue: "", key: "CurrentUserName")
+    }
+    
+    var mcpRegistryBaseURL: PreferenceKey<String> {
+        .init(defaultValue: "https://api.mcp.github.com", key: "MCPRegistryBaseURL")
+    }
+    
+    var mcpRegistryBaseURLHistory: PreferenceKey<[String]> {
+        .init(defaultValue: [], key: "MCPRegistryBaseURLHistory")
+    }
+}
+
+// MARK: - Auto Approval
+public extension UserDefaultPreferenceKeys {
+
+    var enableAutoApproval: PreferenceKey<Bool> {
+        .init(defaultValue: false, key: "EnableAutoApproval")
+    }
+
+    var trustToolAnnotations: PreferenceKey<Bool> {
+        .init(defaultValue: false, key: "TrustToolAnnotations")
+    }
+
+    var sensitiveFilesGlobalApprovals: PreferenceKey<SensitiveFilesRules> {
+        .init(defaultValue: SensitiveFilesRules(), key: "AutoApproval_SensitiveFiles_GlobalApprovals")
+    }
+
+    var mcpServersGlobalApprovals: PreferenceKey<AutoApprovedMCPServers> {
+        .init(defaultValue: AutoApprovedMCPServers(), key: "AutoApproval_MCP_GlobalApprovals")
+    }
+
+    var terminalCommandsGlobalApprovals: PreferenceKey<TerminalCommandsRules> {
+        .init(defaultValue: TerminalCommandsRules(), key: "AutoApproval_Terminal_GlobalApprovals")
     }
 }

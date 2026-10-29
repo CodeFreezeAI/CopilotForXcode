@@ -3,6 +3,7 @@ import AppKit
 import ConversationServiceProvider
 import Foundation
 import Logger
+import ChatAPIService
 
 public class CreateFileTool: ICopilotTool {
     public static let name = ToolName.createFile
@@ -10,7 +11,6 @@ public class CreateFileTool: ICopilotTool {
     public func invokeTool(
         _ request: InvokeClientToolRequest,
         completion: @escaping (AnyJSONRPCResponse) -> Void,
-        chatHistoryUpdater: ChatHistoryUpdater?,
         contextProvider: (any ToolContextProvider)?
     ) -> Bool {
         guard let params = request.params,
@@ -50,12 +50,14 @@ public class CreateFileTool: ICopilotTool {
             return true
         }
         
-        contextProvider?.updateFileEdits(by: .init(
+        let fileEdit: FileEdit = .init(
             fileURL: URL(fileURLWithPath: filePath),
             originalContent: "",
             modifiedContent: writtenContent,
             toolName: CreateFileTool.name
-        ))
+        )
+        
+        contextProvider?.updateFileEdits(by: fileEdit)
         
         NSWorkspace.openFileInXcode(fileURL: URL(fileURLWithPath: filePath)) { _, error in
             if let error = error {
@@ -78,9 +80,7 @@ public class CreateFileTool: ICopilotTool {
             )
         ]
 
-        if let chatHistoryUpdater {
-            chatHistoryUpdater(params.turnId, editAgentRounds)
-        }
+        contextProvider?.updateChatHistory(params.turnId, editAgentRounds: editAgentRounds, fileEdits: [fileEdit])
         
         completeResponse(
             request,

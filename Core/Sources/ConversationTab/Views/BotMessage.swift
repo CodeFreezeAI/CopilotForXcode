@@ -7,60 +7,33 @@ import SwiftUI
 import ConversationServiceProvider
 import ChatTab
 import ChatAPIService
+import HostAppActivator
 
 struct BotMessage: View {
     var r: Double { messageBubbleCornerRadius }
-    let id: String
-    let text: String
-    let references: [ConversationReference]
-    let followUp: ConversationFollowUp?
-    let errorMessages: [String]
+    let message: DisplayedChatMessage
     let chat: StoreOf<Chat>
-    let steps: [ConversationProgressStep]
-    let editAgentRounds: [AgentRound]
-    let panelMessages: [CopilotShowMessageParams]
-    let codeReviewRound: CodeReviewRound?
+    var id: String {
+        message.id
+    }
+    var text: String { message.text }
+    var references: [ConversationReference] { message.references }
+    var followUp: ConversationFollowUp? { message.followUp }
+    var errorMessages: [String] { message.errorMessages }
+    var steps: [ConversationProgressStep] { message.steps }
+    var thinking: [MessageThinking] { message.thinking }
+    var editAgentRounds: [AgentRound] { message.editAgentRounds }
+    var panelMessages: [CopilotShowMessageParams] { message.panelMessages }
+    var codeReviewRound: CodeReviewRound? { message.codeReviewRound }
     
     @Environment(\.colorScheme) var colorScheme
     @AppStorage(\.chatFontSize) var chatFontSize
 
-    @State var isReferencesPresented = false
-    
-    struct ResponseToolBar: View {
-        let id: String
-        let chat: StoreOf<Chat>
-        let text: String
-        
-        var body: some View {
-            HStack(spacing: 4) {
-                
-                UpvoteButton { rating in
-                    chat.send(.upvote(id, rating))
-                }
-                
-                DownvoteButton { rating in
-                    chat.send(.downvote(id, rating))
-                }
-                
-                CopyButton {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(text, forType: .string)
-                    chat.send(.copyCode(id))
-                }
-                
-                Spacer() // Pushes the buttons to the left
-            }
-        }
-    }
+    @State var isHovering = false
     
     struct ReferenceButton: View {
-        var r: Double { messageBubbleCornerRadius }
         let references: [ConversationReference]
         let chat: StoreOf<Chat>
-        
-        @Binding var isReferencesPresented: Bool
-        
-        @State var isReferencesHovered = false
         
         @AppStorage(\.chatFontSize) var chatFontSize
         
@@ -75,154 +48,198 @@ struct BotMessage: View {
         }
         
         var body: some View {
-            VStack(alignment: .leading, spacing: 8) {
-                Button(action: {
-                    isReferencesPresented.toggle()
-                }, label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: isReferencesPresented ? "chevron.down" : "chevron.right")
-                            .resizable()
-                            .scaledToFit()
-                            .scaledFrame(width: 14, height: 14)
-                            
-                        Text(MakeReferenceTitle(references: references))
-                            .scaledFont(size: chatFontSize)
-                    }
-                    .background {
-                        RoundedRectangle(cornerRadius: r - 4)
-                            .fill(isReferencesHovered ? Color.gray.opacity(0.1) : Color.clear)
-                    }
-                    .foregroundStyle(.secondary)
-                })
-                .buttonStyle(HoverButtonStyle())
-                .accessibilityValue(isReferencesPresented ? "Collapse" : "Expand")
-                
-                if isReferencesPresented {
-                    ReferenceList(references: references, chat: chat)
-                        .background(
-                            RoundedRectangle(cornerRadius: 5)
-                                .stroke(Color.gray, lineWidth: 0.2)
-                        )
-                }
-            }
-        }
-    }
-    
-    private var agentWorkingStatus: some View {
-        HStack(spacing: 4) {
-            ProgressView()
-                .controlSize(.small)
-                .frame(width: 20, height: 16)
-                .scaleEffect(0.7)
+            let files = references.map { $0.filePath }
+            let fileHelpTexts = Dictionary<String, String>(uniqueKeysWithValues: references.compactMap { reference in
+                guard reference.url != nil else { return nil }
+                return (reference.filePath, reference.getPathRelativeToHome())
+            })
+            let progressMessage = Text(MakeReferenceTitle(references: references))
+                .foregroundStyle(.secondary)
             
-            Text("Working...")
-                .scaledFont(size: chatFontSize)
-                .foregroundColor(.secondary)
+            HStack(spacing: 0) {
+                ExpandableFileListView(
+                    progressMessage: progressMessage,
+                    files: files,
+                    chatFontSize: chatFontSize,
+                    helpText: "View referenced files",
+                    onFileClick: { filePath in
+                        if let reference = references.first(where: { $0.filePath == filePath }) {
+                            chat.send(.referenceClicked(reference))
+                        }
+                    },
+                    fileHelpTexts: fileHelpTexts
+                )
+                
+                Spacer()
+            }
         }
     }
 
     var body: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 8) {
-                CopilotMessageHeader()
-                
-                if !references.isEmpty {
-                    WithPerceptionTracking {
-                        ReferenceButton(
-                            references: references,
-                            chat: chat,
-                            isReferencesPresented: $isReferencesPresented
-                        )
-                    }
-                }
-                
-                // progress step
-                if steps.count > 0 {
-                    ProgressStep(steps: steps)
-                }
-                
-                if !panelMessages.isEmpty {
-                    WithPerceptionTracking {
-                        ForEach(panelMessages.indices, id: \.self) { index in
-                            FunctionMessage(text: panelMessages[index].message, chat: chat)
+        WithPerceptionTracking {
+            HStack {
+                VStack(alignment: .leading, spacing: 8) {
+                    if !references.isEmpty {
+                        WithPerceptionTracking {
+                            ReferenceButton(
+                                references: references,
+                                chat: chat
+                            )
                         }
                     }
-                }
-                
-                if editAgentRounds.count > 0 {
-                    ProgressAgentRound(rounds: editAgentRounds, chat: chat)
-                }
+                    
+                    // progress step
+                    if steps.count > 0 {
+                        ProgressStep(steps: steps)
 
-                if !text.isEmpty {
-                    ThemedMarkdownText(text: text, chat: chat)
-                }
-                
-                if let codeReviewRound = codeReviewRound {
-                    CodeReviewMainView(
-                        store: chat, round: codeReviewRound
-                    )
-                }
+                    }
 
-                if !errorMessages.isEmpty {
-                    VStack(spacing: 4) {
-                        ForEach(errorMessages.indices, id: \.self) { index in 
-                            if let attributedString = try? AttributedString(markdown: errorMessages[index]) {
-                                NotificationBanner(style: .warning) {
-                                    Text(attributedString)
+                    ForEach(Array(thinking.enumerated()), id: \.offset) { index, entry in
+                        ThinkingView(
+                            thinking: entry,
+                            isStreaming: index == thinking.count - 1 && isThinkingStreaming()
+                        )
+                    }
+
+                    if !panelMessages.isEmpty {
+                        WithPerceptionTracking {
+                            ForEach(panelMessages.indices, id: \.self) { index in
+                                FunctionMessage(text: panelMessages[index].message, chat: chat)
+                            }
+                        }
+                    }
+
+                    if editAgentRounds.count > 0 {
+                        ProgressAgentRound(rounds: editAgentRounds, chat: chat, isStreaming: isThinkingStreaming())
+                    }
+
+                    if !text.isEmpty {
+                        Group{
+                            ThemedMarkdownText(text: text, chat: chat)
+                        }
+                        .scaledPadding(.leading, 2)
+                        .scaledPadding(.vertical, 4)
+                    }
+                    
+                    if let codeReviewRound = codeReviewRound {
+                        CodeReviewMainView(
+                            store: chat, round: codeReviewRound
+                        )
+                        .frame(maxWidth: .infinity)
+                    }
+                    
+                    if !errorMessages.isEmpty {
+                        buildErrorMessageView()
+                    }
+
+                    HStack {
+                        if shouldShowTurnStatus() {
+                            TurnStatusView(
+                                message: message,
+                                isSummarizingConversation: chat.isSummarizingConversation
+                            )
+                                .modify { view in
+                                    if message.turnStatus == .inProgress {
+                                        view
+                                            .scaledPadding(.leading, 6)
+                                    } else {
+                                        view
+                                    }
                                 }
+                        }
+
+                        Spacer()
+
+                        ResponseToolBar(
+                            id: id,
+                            chat: chat,
+                            text: text,
+                            message: message
+                        )
+                            .conditionalFontWeight(.medium)
+                            .opacity(shouldShowToolBar() ? 1 : 0)
+                            .scaledPadding(.trailing, -20)
+                    }
+                }
+                .padding(.leading, message.parentTurnId != nil ? 4 : 0)
+                .shadow(color: .black.opacity(0.05), radius: 6)
+                .contextMenu {
+                    Button("Copy") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(text, forType: .string)
+                    }
+                    .scaledFont(.body)
+                    
+                    Button("Set as Extra System Prompt") {
+                        chat.send(.setAsExtraPromptButtonTapped(id))
+                    }
+                    .scaledFont(.body)
+                    
+                    Divider()
+                    
+                    Button("Delete") {
+                        chat.send(.deleteMessageButtonTapped(id))
+                    }
+                    .scaledFont(.body)
+                }
+                .onHover {
+                    isHovering = $0
+                }
+            }
+        }
+    }
+    
+    @ViewBuilder
+    private func buildErrorMessageView() -> some View {
+        VStack(spacing: 4) {
+            ForEach(errorMessages.indices, id: \.self) { index in
+                if let attributedString = try? AttributedString(markdown: errorMessages[index]) {
+                    NotificationBanner(style: .warning) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(attributedString)
+                            
+                            if isSettingsActionableError(errorMessages[index]) {
+                                Button(action: {
+                                    Task {
+                                        try? launchHostAppAdvancedSettings()
+                                    }
+                                }) {
+                                    Text("Open Settings")
+                                }
+                                .buttonStyle(.link)
                             }
                         }
                     }
                 }
-                
-                if shouldShowWorkingStatus() {
-                    agentWorkingStatus
-                }
-                
-                if shouldShowToolBar() {
-                    ResponseToolBar(id: id, chat: chat, text: text)
-                }
-            }
-            .shadow(color: .black.opacity(0.05), radius: 6)
-            .contextMenu {
-                Button("Copy") {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(text, forType: .string)
-                }
-                .scaledFont(.body)
-                
-                Button("Set as Extra System Prompt") {
-                    chat.send(.setAsExtraPromptButtonTapped(id))
-                }
-                .scaledFont(.body)
-                
-                Divider()
-                
-                Button("Delete") {
-                    chat.send(.deleteMessageButtonTapped(id))
-                }
-                .scaledFont(.body)
             }
         }
+        .scaledPadding(.vertical, 4)
     }
     
-    private func shouldShowWorkingStatus() -> Bool {
-        let hasRunningStep: Bool = steps.contains(where: { $0.status == .running })
-        let hasRunningRound: Bool = editAgentRounds.contains(where: { round in
-            return round.toolCalls?.contains(where: { $0.status == .running }) ?? false
-        })
-        
-        if hasRunningStep || hasRunningRound {
+    private func isSettingsActionableError(_ message: String) -> Bool {
+        message == HardCodedToolRoundExceedErrorMessage ||
+        message == SSLCertificateErrorMessage
+    }
+
+    private func shouldShowTurnStatus() -> Bool {
+        guard isLatestAssistantMessage() else {
             return false
         }
         
-        // Only show working status for the current bot message being received
-        return chat.isReceivingMessage && isLatestAssistantMessage()
+        if steps.isEmpty && editAgentRounds.isEmpty {
+            return true
+        }
+        
+        if !steps.isEmpty {
+            return !message.text.isEmpty
+        }
+        
+        return true
     }
     
     private func shouldShowToolBar() -> Bool {
         // Always show toolbar for historical messages
-        if !isLatestAssistantMessage() { return true }
+        if !isLatestAssistantMessage() { return isHovering }
         
         // For current message, only show toolbar when message is complete
         return !chat.isReceivingMessage
@@ -232,76 +249,97 @@ struct BotMessage: View {
         let lastMessage = chat.history.last
         return lastMessage?.role == .assistant && lastMessage?.id == id
     }
+
+    private func isThinkingStreaming() -> Bool {
+        guard isLatestAssistantMessage(), chat.isReceivingMessage else { return false }
+        switch message.turnStatus {
+        case .success, .error, .cancelled: return false
+        default: return true
+        }
+    }
 }
 
-struct ReferenceList: View {
-    let references: [ConversationReference]
-    let chat: StoreOf<Chat>
+private struct TurnStatusView: View {
 
-    private let maxVisibleItems: Int = 6
-    @State private var itemHeight: CGFloat = 16
-    
+    let message: DisplayedChatMessage
+    let isSummarizingConversation: Bool
+
     @AppStorage(\.chatFontSize) var chatFontSize
-    
-    struct ReferenceView: View {
-        let references: [ConversationReference]
-        let chat: StoreOf<Chat>
-        @AppStorage(\.chatFontSize) var chatFontSize
-        @Binding var itemHeight: CGFloat
-        
-        var body: some View {
-            VStack(alignment: .leading, spacing: 0) {
-                ForEach(0..<references.endIndex, id: \.self) { index in
-                    WithPerceptionTracking {
-                        let reference = references[index]
-
-                        Button(action: {
-                            chat.send(.referenceClicked(reference))
-                        }) {
-                            HStack(spacing: 8) {
-                                drawFileIcon(reference.url, isDirectory: reference.isDirectory)
-                                    .resizable()
-                                    .scaledToFit()
-                                    .scaledFrame(width: 16, height: 16)
-                                Text(reference.fileName)
-                                    .truncationMode(.middle)
-                                    .lineLimit(1)
-                                    .layoutPriority(1)
-                                    .scaledFont(size: chatFontSize)
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                        .buttonStyle(HoverButtonStyle())
-                        .background(GeometryReader { geometry in
-                            Color.clear.onAppear {
-                                itemHeight = geometry.size.height
-                            }
-                        })
-                        .help(reference.getPathRelativeToHome())
-                    }
-                }
-            }
-        }
-    }
 
     var body: some View {
-        WithPerceptionTracking {
-            if references.count <= maxVisibleItems {
-                ReferenceView(references: references,  chat: chat, itemHeight: $itemHeight)
-            } else {
-                HoverScrollView {
-                    ReferenceView(references: references,  chat: chat, itemHeight: $itemHeight)
+        HStack(spacing: 0) {
+            if isSummarizingConversation {
+                summarizingStatus
+            } else if let turnStatus = message.turnStatus {
+                switch turnStatus {
+                case .inProgress:
+                    inProgressStatus
+                case .success:
+                    completedStatus
+                case .cancelled:
+                    cancelStatus
+                case .error:
+                    EmptyView()
+                case .waitForConfirmation:
+                    waitForConfirmationStatus
                 }
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: maxViewHeight)
-
     }
     
-    private var maxViewHeight: CGFloat {
-        let totalHeight = CGFloat(references.count) * itemHeight
-        let maxHeight = CGFloat(maxVisibleItems) * itemHeight
-        return min(totalHeight, maxHeight)
+    private var inProgressStatus: some View {
+        HStack(spacing: 4) {
+            ProgressView()
+                .controlSize(.small)
+                .scaledScaleEffect(0.7)
+                .scaledFrame(width: 16, height: 16)
+
+            Text("Generating...")
+                .scaledFont(size: chatFontSize - 1)
+                .foregroundColor(.secondary)
+        }
+    }
+
+    private var summarizingStatus: some View {
+        HStack(spacing: 4) {
+            ProgressView()
+                .controlSize(.small)
+                .scaledScaleEffect(0.7)
+                .scaledFrame(width: 16, height: 16)
+
+            Text("Summarizing conversation...")
+                .scaledFont(size: chatFontSize - 1)
+                .foregroundColor(.secondary)
+        }
+    }
+    
+    private var completedStatus: some View {
+        statusView(icon: "checkmark.circle.fill", iconColor: .successLightGreen, text: "Completed")
+    }
+    
+    private var waitForConfirmationStatus: some View {
+        statusView(icon: "clock.fill", iconColor: .brown, text: "Waiting for your response")
+    }
+    
+    private var cancelStatus: some View {
+        statusView(icon: "slash.circle", iconColor: .secondary, text: "Stopped")
+    }
+    
+    private var errorStatus: some View {
+        statusView(icon: "xmark.circle.fill", iconColor: .red, text: "Error Occurred")
+    }
+    
+    private func statusView(icon: String, iconColor: Color, text: String) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: icon)
+                .scaledFont(size: chatFontSize)
+                .foregroundColor(iconColor)
+                .conditionalFontWeight(.medium)
+            
+            Text(text)
+                .scaledFont(size: chatFontSize - 1)
+                .foregroundColor(.secondary)
+        }
     }
 }
 
@@ -334,72 +372,34 @@ struct BotMessage_Previews: PreviewProvider {
     static var previews: some View {
         let chatTabInfo = ChatTabInfo(id: "id", workspacePath: "path", username: "name")
         BotMessage(
-            id: "1",
-            text: """
-            **Hey**! What can I do for you?**Hey**! What can I do for you?**Hey**! What can I do for you?**Hey**! What can I do for you?
-            ```swift
-            func foo() {}
-            ```
-            """,
-            references: .init(repeating: .init(
-                uri: "/Core/Sources/ConversationTab/Views/BotMessage.swift",
-                status: .included,
-                kind: .class,
-                referenceType: .file
-            ), count: 2),
-            followUp: ConversationFollowUp(message: "followup question", id: "id", type: "type"),
-            errorMessages: ["Sorry, an error occurred while generating a response."],
+            message: .init(
+                id: "1",
+                role: .assistant,
+                text: """
+                    **Hey**! What can I do for you?**Hey**! What can I do for you?**Hey**! What can I do for you?**Hey**! What can I do for you?
+                    ```swift
+                    func foo() {}
+                    ```
+                    """,
+                references: .init(
+                    repeating: .init(
+                    uri: "/Core/Sources/ConversationTab/Views/BotMessage.swift",
+                    status: .included,
+                    kind: .class,
+                    referenceType: .file),
+                    count: 2
+                ),
+                followUp: ConversationFollowUp(message: "followup question", id: "id", type: "type"),
+                errorMessages: ["Sorry, an error occurred while generating a response."],
+                steps: steps,
+                editAgentRounds: agentRounds,
+                panelMessages: [],
+                codeReviewRound: nil,
+                requestType: .conversation
+            ),
             chat: .init(initialState: .init(), reducer: { Chat(service: ChatService.service(for: chatTabInfo)) }),
-            steps: steps,
-            editAgentRounds: agentRounds,
-            panelMessages: [],
-            codeReviewRound: nil
         )
         .padding()
         .fixedSize(horizontal: true, vertical: true)
-    }
-}
-
-struct ReferenceList_Previews: PreviewProvider {
-    static var previews: some View {
-        let chatTabInfo = ChatTabInfo(id: "id", workspacePath: "path", username: "name")
-        ReferenceList(references: [
-            .init(
-                uri: "/Core/Sources/ConversationTab/Views/BotMessage.swift",
-                status: .included,
-                kind: .class,
-                referenceType: .file
-            ),
-            .init(
-                uri: "/Core/Sources/ConversationTab/Views",
-                status: .included,
-                kind: .struct,
-                referenceType: .file
-            ),
-            .init(
-                uri: "/Core/Sources/ConversationTab/Views/BotMessage.swift",
-                status: .included,
-                kind: .function,
-                referenceType: .file
-            ),
-            .init(
-                uri: "/Core/Sources/ConversationTab/Views/BotMessage.swift",
-                status: .included,
-                kind: .case,
-                referenceType: .file
-            ),
-            .init(
-                uri: "/Core/Sources/ConversationTab/Views/BotMessage.swift",
-                status: .included,
-                kind: .extension,
-                referenceType: .file
-            ),
-            .init(
-                uri: "/Core/Sources/ConversationTab/Views/BotMessage.swift",
-                status: .included,
-                kind: .webpage,
-                referenceType: .file
-            ),
-        ], chat: .init(initialState: .init(), reducer: { Chat(service: ChatService.service(for: chatTabInfo)) }))
     }
 }

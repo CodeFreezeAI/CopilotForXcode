@@ -42,6 +42,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var quotaItem: NSMenuItem!
     var toggleCompletions: NSMenuItem!
     var toggleIgnoreLanguage: NSMenuItem!
+    var toggleNES: NSMenuItem!
     var openChat: NSMenuItem!
     var signOutItem: NSMenuItem!
     var xpcController: XPCController?
@@ -67,6 +68,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         Logger.service.info("XPC Service started.")
         NSApp.setActivationPolicy(.accessory)
         buildStatusBarMenu()
+        _ = FeatureFlagNotifierImpl.shared
+        observeFeatureFlags()
         watchServiceStatus()
         watchAXStatus()
         watchAuthStatus()
@@ -234,6 +237,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             }
         }
     }
+    
+    
+    func observeFeatureFlags() {
+        Task { @MainActor in
+            FeatureFlagNotifierImpl.shared.featureFlagsDidChange
+                .sink(receiveValue: { [weak self] featureFlags in
+                    self?.toggleNES.isHidden = !featureFlags.editorPreviewFeatures
+                })
+        }
+    }
 
     func watchAuthStatus() {
         let notifications = DistributedNotificationCenter.default().notifications(named: .authStatusDidChange)
@@ -269,8 +282,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             let service = try await GitHubCopilotViewModel.shared.getGitHubCopilotAuthService()
             let accountStatus = try await service.checkStatus()
             if accountStatus == .ok || accountStatus == .maybeOk {
-                let quota = try await service.checkQuota()
-                Logger.service.info("User quota checked successfully: \(quota)")
+                await GitHubCopilotViewModel.shared.refreshQuotaIfNeeded()
             }
         } catch {
             Logger.service.error("Failed to read auth status: \(error)")
@@ -286,6 +298,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         self.quotaItem.isHidden = true
         self.toggleCompletions.isHidden = true
         self.toggleIgnoreLanguage.isHidden = true
+        self.toggleNES.isHidden = true
         self.signOutItem.isHidden = true
     }
 
@@ -300,59 +313,62 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             // If the quota is nil, keep the original auth status item
             // Else only log the CLS error other than quota limit reached error
             if CLSMessageSummary.summary == CLSMessageType.other.summary || status.quotaInfo == nil {
-                self.authStatusItem.isHidden = false
-                self.authStatusItem.title = CLSMessageSummary.summary
-                
-                let submenu = NSMenu()
-                let attributedCLSErrorItem = NSMenuItem()
-                attributedCLSErrorItem.view = ErrorMessageView(
-                    errorMessage: CLSMessageSummary.detail
+                configureCLSAuthStatusItem(
+                    summary: CLSMessageSummary,
+                    actionTitle: "View Details on GitHub",
+                    action: #selector(openGitHubDetailsLink)
                 )
-                submenu.addItem(attributedCLSErrorItem)
-                submenu.addItem(.separator())
-                submenu.addItem(
-                    NSMenuItem(
-                        title: "View Details on GitHub",
-                        action: #selector(openGitHubDetailsLink),
-                        keyEquivalent: ""
-                    )
+            } else if CLSMessageSummary.summary == CLSMessageType.byokLimitedReached.summary {
+                configureCLSAuthStatusItem(
+                    summary: CLSMessageSummary,
+                    actionTitle: "Dismiss",
+                    action: #selector(dismissBYOKMessage)
                 )
-                
-                self.authStatusItem.submenu = submenu
-                self.authStatusItem.isEnabled = true
+            } else {
+                // Explicitly hide to avoid leaving stale content if another CLS state was previously shown.
+                self.authStatusItem.isHidden = true
             }
         } else {
             self.authStatusItem.isHidden = true
         }
         
-        if let quotaInfo = status.quotaInfo, !quotaInfo.resetDate.isEmpty {
+        if let quotaInfo = status.quotaInfo {
             self.quotaItem.isHidden = false
-            self.quotaItem.view = QuotaView(
-                chat: .init(
-                    percentRemaining: quotaInfo.chat.percentRemaining,
-                    unlimited: quotaInfo.chat.unlimited,
-                    overagePermitted: quotaInfo.chat.overagePermitted
-                ),
-                completions: .init(
-                    percentRemaining: quotaInfo.completions.percentRemaining,
-                    unlimited: quotaInfo.completions.unlimited,
-                    overagePermitted: quotaInfo.completions.overagePermitted
-                ),
-                premiumInteractions: .init(
-                    percentRemaining: quotaInfo.premiumInteractions.percentRemaining,
-                    unlimited: quotaInfo.premiumInteractions.unlimited,
-                    overagePermitted: quotaInfo.premiumInteractions.overagePermitted
-                ),
-                resetDate: quotaInfo.resetDate,
-                copilotPlan: quotaInfo.copilotPlan
-            )
+            self.quotaItem.view = QuotaView(quotaInfo: quotaInfo)
         } else {
             self.quotaItem.isHidden = true
         }
         
         self.toggleCompletions.isHidden = false
         self.toggleIgnoreLanguage.isHidden = false
+        self.toggleNES.isHidden = false
         self.signOutItem.isHidden = false
+    }
+
+    func configureCLSAuthStatusItem(
+        summary: CLSMessage,
+        actionTitle: String,
+        action: Selector
+    ) {
+        self.authStatusItem.isHidden = false
+        self.authStatusItem.title = summary.summary
+        let submenu = NSMenu()
+        
+        let attributedCLSErrorItem = NSMenuItem()
+        attributedCLSErrorItem.view = ErrorMessageView(
+            errorMessage: summary.detail
+        )
+        submenu.addItem(attributedCLSErrorItem)
+        submenu.addItem(.separator())
+        submenu.addItem(
+            NSMenuItem(
+                title: actionTitle,
+                action: action,
+                keyEquivalent: ""
+            )
+        )
+        self.authStatusItem.submenu = submenu
+        self.authStatusItem.isEnabled = true
     }
 
     private func configureNotAuthorized(status: StatusResponse) {
@@ -378,6 +394,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         self.quotaItem.isHidden = true
         self.toggleCompletions.isHidden = true
         self.toggleIgnoreLanguage.isHidden = true
+        self.toggleNES.isHidden = true
         self.signOutItem.isHidden = false
     }
 
@@ -391,6 +408,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         self.quotaItem.isHidden = true
         self.toggleCompletions.isHidden = false
         self.toggleIgnoreLanguage.isHidden = false
+        self.toggleNES.isHidden = false
         self.signOutItem.isHidden = false
     }
 
@@ -477,6 +495,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             }
         }
     }
+    
+    @objc func dismissBYOKMessage() {
+        Task {
+            await Status.shared.updateCLSStatus(.normal, busy: false, message: "")
+        }
+    }
 }
 
 extension NSRunningApplication {
@@ -491,6 +515,8 @@ extension NSRunningApplication {
 enum CLSMessageType {
     case chatLimitReached
     case completionLimitReached
+    case byokLimitedReached
+    case monthlyAICreditsLimitReached
     case other
     
     var summary: String {
@@ -499,6 +525,10 @@ enum CLSMessageType {
             return "Monthly Chat Limit Reached"
         case .completionLimitReached:
             return "Monthly Completion Limit Reached"
+        case .byokLimitedReached:
+            return "BYOK Limit Reached"
+        case .monthlyAICreditsLimitReached:
+            return "Monthly AI Credits Limit Reached"
         case .other:
             return "CLS Error"
         }
@@ -510,14 +540,6 @@ struct CLSMessage {
     let detail: String
 }
 
-func extractDateFromCLSMessage(_ message: String) -> String? {
-    let pattern = #"until (\d{1,2}/\d{1,2}/\d{4}, \d{1,2}:\d{2}:\d{2} [AP]M)"#
-    if let range = message.range(of: pattern, options: .regularExpression) {
-        return String(message[range].dropFirst(6))
-    }
-    return nil
-}
-
 func getCLSMessageSummary(_ message: String) -> CLSMessage {
     let messageType: CLSMessageType
     
@@ -526,16 +548,13 @@ func getCLSMessageSummary(_ message: String) -> CLSMessage {
         messageType = .chatLimitReached
     } else if message.contains("Completions limit reached") {
         messageType = .completionLimitReached
+    } else if message.contains("BYOK") {
+        messageType = .byokLimitedReached
+    } else if message.contains("You've used your monthly AI Credits") {
+        messageType = .monthlyAICreditsLimitReached
     } else {
         messageType = .other
     }
     
-    let detail: String
-    if let date = extractDateFromCLSMessage(message) {
-        detail = "Visit GitHub to check your usage and upgrade to Copilot Pro or wait until \(date) for your limit to reset."
-    } else {
-        detail = message
-    }
-    
-    return CLSMessage(summary: messageType.summary, detail: detail)
+    return CLSMessage(summary: messageType.summary, detail: message)
 }

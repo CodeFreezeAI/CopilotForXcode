@@ -15,4 +15,12 @@ extension Chat.State {
         )
         return [CurrentEditorSkill(currentFile: fileReference), ProblemsInActiveDocumentSkill()]
     }
+    
+    func getChatContext(of mode: Chat.EditorMode) -> ChatContext {
+        return editor.context(for: mode)
+    }
+    
+    func getSubsequentMessages(after messageId: String) -> [DisplayedChatMessage] {
+        conversation.subsequentMessages(after: messageId)
+    }
 }

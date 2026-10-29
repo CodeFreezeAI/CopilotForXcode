@@ -4,6 +4,8 @@ import ComposableArchitecture
 import Status
 import SwiftUI
 import Cache
+import Client
+import Logger
 
 public struct SignInResponse {
     public let status: SignInInitiateStatus
@@ -29,6 +31,9 @@ public class GitHubCopilotViewModel: ObservableObject {
     @Published public var waitingForSignIn = false
     
     static var copilotAuthService: GitHubCopilotService?
+
+    private var lastQuotaCheckDate: Date?
+    private static let quotaCacheInterval: TimeInterval = 60 // seconds
     
     // Make init private to enforce singleton pattern
     private init() {}
@@ -126,7 +131,7 @@ public class GitHubCopilotViewModel: ObservableObject {
         waitingForSignIn = false
     }
     
-    public func copyAndOpen() {
+    public func copyAndOpen(fromHostApp: Bool = false) {
         waitingForSignIn = true
         guard let signInResponse else {
             toast("Missing sign in details.", .error)
@@ -137,10 +142,10 @@ public class GitHubCopilotViewModel: ObservableObject {
         pasteboard.setString(signInResponse.userCode, forType: NSPasteboard.PasteboardType.string)
         toast("Sign-in code \(signInResponse.userCode) copied", .info)
         NSWorkspace.shared.open(signInResponse.verificationURL)
-        waitForSignIn()
+        waitForSignIn(fromHostApp: fromHostApp)
     }
     
-    public func waitForSignIn() {
+    public func waitForSignIn(fromHostApp: Bool = false) {
         Task {
             do {
                 guard waitingForSignIn else { return }
@@ -155,14 +160,19 @@ public class GitHubCopilotViewModel: ObservableObject {
                 self.status = status
                 await Status.shared.updateAuthStatus(.loggedIn, username: username)
                 broadcastStatusChange()
-                let models = try? await service.models()
-                if let models = models, !models.isEmpty {
-                    CopilotModelManager.updateLLMs(models)
+                if !fromHostApp {
+                    let models = try? await service.models()
+                    if let models = models, !models.isEmpty {
+                        CopilotModelManager.updateLLMs(models)
+                    }
+                } else {
+                    let xpcService = try getService()
+                    _ = try? await xpcService.updateCopilotModels()
                 }
             } catch let error as GitHubCopilotError {
                 switch error {
                 case .languageServerError(.timeout):
-                    waitForSignIn()
+                    waitForSignIn(fromHostApp: fromHostApp)
                     return
                 case .languageServerError(
                     .serverError(
@@ -356,5 +366,24 @@ public class GitHubCopilotViewModel: ObservableObject {
             name: .authStatusDidChange,
             object: nil
         )
+    }
+
+    /// Refreshes quota info only if the cache has expired (older than 60s).
+    public func refreshQuotaIfNeeded() {
+        if let lastCheck = lastQuotaCheckDate,
+           Date().timeIntervalSince(lastCheck) < Self.quotaCacheInterval {
+            return
+        }
+        Task {
+            do {
+                let service = try getGitHubCopilotAuthService()
+                let accountStatus = try await service.checkStatus()
+                guard accountStatus == .ok || accountStatus == .maybeOk else { return }
+                let _ = try await service.checkQuota()
+                lastQuotaCheckDate = Date()
+            } catch {
+                Logger.client.error("Failed to refresh quota: \(error)")
+            }
+        }
     }
 }

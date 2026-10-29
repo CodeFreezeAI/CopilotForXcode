@@ -1,0 +1,17 @@
+{
+  "name": "GitHub Copilot",
+  "slug": "github-copilot",
+  "description": "GitHub's AI pair programmer",
+  "version": "0.1.0",
+  "author": {
+    "name": "GitHub",
+    "url": "https://github.com/github"
+  },
+  "repository": "https://github.com/github/CopilotForXcode",
+  "homepage": "https://github.com/features/copilot/",
+  "license": "proprietary",
+  "icon": "https://raw.githubusercontent.com/github/CopilotForXcode/main/.agent-plugin/icon.svg",
+  "tags": ["copilot", "github", "acp", "ai-assistant"],
+  "category": "ai-agent",
+  "platforms": ["darwin-aarch64"]
+}

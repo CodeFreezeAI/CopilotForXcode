@@ -38,6 +38,21 @@ public class SystemUtils {
     public static let buildType: String = {
         return shared.isDeveloperMode() ? "true" : "false"
     }()
+    
+    public static let isDeveloperMode: Bool = {
+        return shared.isDeveloperMode()
+    }()
+
+    public static let isPrereleaseBuild: Bool = {
+        let components = editorPluginVersionString.split(separator: ".")
+        if components.count >= 3 {
+            let patchComponent = String(components[2])
+            // If patch version is not "0"
+            return patchComponent != "0"
+        }
+
+        return false
+    }()
 
     private init() {}
 

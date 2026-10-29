@@ -17,10 +17,10 @@ public struct DownvoteButton: View {
         }) {
             Image(systemName: isSelected ? "hand.thumbsdown.fill" : "hand.thumbsdown")
                 .resizable()
-                .aspectRatio(contentMode: .fit)
-                .scaledFrame(width: 14, height: 14)
+                .scaledToFit()
+                .scaledPadding(2)
+                .scaledFrame(width: 16, height: 16)
                 .foregroundColor(.secondary)
-                .padding(4)
                 .help("Unhelpful")
         }
         .buttonStyle(HoverButtonStyle(padding: 0))

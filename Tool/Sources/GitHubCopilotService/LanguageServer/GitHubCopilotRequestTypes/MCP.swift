@@ -7,6 +7,7 @@ public enum MCPServerStatus: String, Codable, Equatable, Hashable {
     case running = "running"
     case stopped = "stopped"
     case error = "error"
+    case blocked = "blocked"
 }
 
 public struct InputSchema: Codable, Equatable, Hashable {
@@ -109,12 +110,20 @@ public struct MCPServerToolsCollection: Codable, Equatable, Hashable {
     public let status: MCPServerStatus
     public let tools: [MCPTool]
     public let error: String?
+    public let registryInfo: String?
     
-    public init(name: String, status: MCPServerStatus, tools: [MCPTool], error: String? = nil) {
+    public init(
+        name: String,
+        status: MCPServerStatus,
+        tools: [MCPTool],
+        error: String? = nil,
+        registryInfo: String? = nil
+    ) {
         self.name = name
         self.status = status
         self.tools = tools
         self.error = error
+        self.registryInfo = registryInfo
     }
 }
 
@@ -147,22 +156,78 @@ public struct UpdateMCPToolsStatusServerCollection: Codable, Hashable {
 }
 
 public struct UpdateMCPToolsStatusParams: Codable, Hashable {
+    public var chatModeKind: ChatMode?
+    public var customChatModeId: String?
+    public var workspaceFolders: [WorkspaceFolder]?
     public var servers: [UpdateMCPToolsStatusServerCollection]
-    
-    public init(servers: [UpdateMCPToolsStatusServerCollection]) {
+
+    public init(
+        chatModeKind: ChatMode? = nil,
+        customChatModeId: String? = nil,
+        workspaceFolders: [WorkspaceFolder]? = nil,
+        servers: [UpdateMCPToolsStatusServerCollection]
+    ) {
+        self.chatModeKind = chatModeKind
+        self.customChatModeId = customChatModeId
+        self.workspaceFolders = workspaceFolders
         self.servers = servers
     }
 }
 
 public typealias CopilotMCPToolsRequest = JSONRPCRequest<GetAllToolsParams>
 
-public struct MCPOAuthRequestParams: Codable, Hashable {
-    public var mcpServer: String
-    public var authLabel: String
+public struct DynamicOAuthParams: Codable, Hashable {
+    public let title: String
+    public let header: String?
+    public let detail: String
+    public let inputs: [DynamicOAuthInput]
+
+    public init(
+        title: String,
+        header: String?,
+        detail: String,
+        inputs: [DynamicOAuthInput]
+    ) {
+        self.title = title
+        self.header = header
+        self.detail = detail
+        self.inputs = inputs
+    }
 }
 
-public struct MCPOAuthResponse: Codable, Hashable {
-    public var confirm: Bool
+public struct DynamicOAuthInput: Codable, Hashable {
+    public let title: String
+    public let value: String
+    public let description: String
+    public let placeholder: String
+    public let required: Bool
+    
+    public init(
+        title: String,
+        value: String,
+        description: String,
+        placeholder: String,
+        required: Bool
+    ) {
+        self.title = title
+        self.value = value
+        self.description = description
+        self.placeholder = placeholder
+        self.required = required
+    }
 }
 
-public typealias MCPOAuthRequest = JSONRPCRequest<MCPOAuthRequestParams>
+public typealias DynamicOAuthRequest = JSONRPCRequest<DynamicOAuthParams>
+
+public struct DynamicOAuthResponse: Codable, Hashable {
+    public let clientId: String
+    public let clientSecret: String
+    
+    public init(
+        clientId: String,
+        clientSecret: String
+    ) {
+        self.clientId = clientId
+        self.clientSecret = clientSecret
+    }
+}

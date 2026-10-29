@@ -15,7 +15,12 @@ public class CopilotMCPToolManager {
         availableMCPServerTools = sortedMCPServerTools
         DispatchQueue.main.async {
             Logger.client.info("Notify about MCP tools change: \(getToolsSummary())")
-            DistributedNotificationCenter.default().post(name: .gitHubCopilotMCPToolsDidChange, object: nil)
+            DistributedNotificationCenter.default().postNotificationName(
+                .gitHubCopilotMCPToolsDidChange,
+                object: nil,
+                userInfo: nil,
+                deliverImmediately: true
+            )
         }
     }
 
@@ -23,7 +28,7 @@ public class CopilotMCPToolManager {
         var summary = ""
         guard let tools = availableMCPServerTools else { return summary }
         for server in tools {
-            summary += "Server: \(server.name) with \(server.tools.count) tools (\(server.tools.filter { $0._status == .enabled }.count) enabled, \(server.tools.filter { $0._status == .disabled }.count) disabled). "
+            summary += "Server: \(server.name) \(server.status), with \(server.tools.count) tools (\(server.tools.filter { $0._status == .enabled }.count) enabled, \(server.tools.filter { $0._status == .disabled }.count) disabled). "
         }
 
         return summary
@@ -45,7 +50,12 @@ public class CopilotMCPToolManager {
     public static func clearMCPTools() {
         availableMCPServerTools = []
         DispatchQueue.main.async {
-            DistributedNotificationCenter.default().post(name: .gitHubCopilotMCPToolsDidChange, object: nil)
+            DistributedNotificationCenter.default().postNotificationName(
+                .gitHubCopilotMCPToolsDidChange,
+                object: nil,
+                userInfo: nil,
+                deliverImmediately: true
+            )
         }
     }
 }

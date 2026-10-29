@@ -1,12 +1,20 @@
 # <img align="center" height="70" src="./Docs/Images/AppIcon.png"/> GitHub Copilot for Xcode
 
-[GitHub Copilot](https://github.com/features/copilot) is an AI pair programmer
-tool that helps you write code faster and smarter. Copilot for Xcode is an Xcode extension that provides inline coding suggestions as you type and a chat assistant to answer your coding questions.
+[GitHub Copilot](https://github.com/features/copilot) for Xcode is the leading AI coding assistant for Swift, Objective-C and iOS/macOS development. It delivers intelligent Completions, Chat, and Code Review—plus advanced features like Agent Mode, Next Edit Suggestions, MCP Registry, and Copilot Vision to make Xcode development faster and smarter.
+
+> [!IMPORTANT]  
+> Starting from version v0.50.0, we have added internal support for the upcoming usage-based billing experience, including experience updates to the usage panel, usage notifications, and model picker. These changes will become visible once usage-based billing is rolled out. 
+> 
+> To ensure compatibility with the new billing experience, we strongly recommend upgrading to the latest plugin version as soon as possible: 
+> 
+> * **GitHub Copilot for Xcode: v0.50.0 or later**
+> 
+> Clients using older plugin versions will continue to function. However, the billing and usage experience may not be optimal and may not accurately reflect the latest usage-based billing experience. 
 
 ## Chat
 
 GitHub Copilot Chat provides suggestions to your specific coding tasks via chat.
-<img alt="Chat of GitHub Copilot for Xcode" src="./Docs/Images/chat_dark.gif" width="800" />
+<img alt="Chat of GitHub Copilot for Xcode" src="./Docs/Images/chat_agent.gif" width="800" />
 
 ## Agent Mode
 
@@ -27,9 +35,9 @@ You can receive auto-complete type suggestions from GitHub Copilot either by sta
 
 ## Requirements
 
-- macOS 12+
-- Xcode 8+
-- A GitHub Copilot subscription. To learn more, visit [https://github.com/features/copilot](https://github.com/features/copilot).
+- macOS 13+
+- Xcode 14+
+- A GitHub account
 
 ## Getting Started
 
@@ -146,7 +154,7 @@ Copilot for Xcode.
 
 We’d love to get your help in making GitHub Copilot better!  If you have
 feedback or encounter any problems, please reach out on our [Feedback
-forum](https://github.com/orgs/community/discussions/categories/copilot).
+forum](https://github.com/github/CopilotForXcode/discussions).
 
 ## Acknowledgements
 

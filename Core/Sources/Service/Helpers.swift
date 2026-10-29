@@ -6,6 +6,7 @@ extension NSError {
     static func from(_ error: Error) -> NSError {
         if let error = error as? ServerError {
             var message = "Unknown"
+            var errorData: Codable? = nil
             switch error {
             case let .handlerUnavailable(handler):
                 message = "Handler unavailable: \(handler)."
@@ -29,8 +30,9 @@ extension NSError {
                 message = "Unable to send request: \(error.localizedDescription)."
             case let .unableToSendNotification(error):
                 message = "Unable to send notification: \(error.localizedDescription)."
-            case let .serverError(code, m, _):
+            case let .serverError(code, m, data):
                 message = "Server error: (\(code)) \(m)."
+                errorData = data
             case let .invalidRequest(error):
                 message = "Invalid request: \(error?.localizedDescription ?? "Unknown")."
             case .timeout:
@@ -38,9 +40,28 @@ extension NSError {
             case .unknownError:
                 message = "Unknown error: \(error.localizedDescription)."
             }
-            return NSError(domain: "com.github.CopilotForXcode", code: -1, userInfo: [
-                NSLocalizedDescriptionKey: message,
-            ])
+            
+            var userInfo: [String: Any] = [NSLocalizedDescriptionKey: message]
+            
+            // Try to encode errorData to JSON for XPC transfer
+            if let errorData = errorData {
+                // Try to decode as MCPRegistryErrorData first
+                if let jsonData = try? JSONEncoder().encode(errorData),
+                   let mcpErrorData = try? JSONDecoder().decode(MCPRegistryErrorData.self, from: jsonData) {
+                    userInfo["errorType"] = mcpErrorData.errorType
+                    if let status = mcpErrorData.status {
+                        userInfo["status"] = status
+                    }
+                    if let shouldRetry = mcpErrorData.shouldRetry {
+                        userInfo["shouldRetry"] = shouldRetry
+                    }
+                } else if let jsonData = try? JSONEncoder().encode(errorData) {
+                    // Fallback to encoding any Codable type
+                    userInfo["serverErrorData"] = jsonData
+                }
+            }
+            
+            return NSError(domain: "com.github.CopilotForXcode", code: -1, userInfo: userInfo)
         }
         if let error = error as? CancellationError {
             return NSError(domain: "com.github.CopilotForXcode", code: -100, userInfo: [

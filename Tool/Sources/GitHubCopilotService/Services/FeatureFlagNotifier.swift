@@ -35,7 +35,8 @@ public struct FeatureFlags: Hashable, Codable {
     public var byok: Bool
     public var editorPreviewFeatures: Bool
     public var activeExperimentForFeatureFlags: ActiveExperimentForFeatureFlags
-    
+    public var agentModeAutoApproval: Bool
+
     public init(
         restrictedTelemetry: Bool = true,
         snippy: Bool = true,
@@ -47,7 +48,8 @@ public struct FeatureFlags: Hashable, Codable {
         ccr: Bool = true,
         byok: Bool = true,
         editorPreviewFeatures: Bool = true,
-        activeExperimentForFeatureFlags: ActiveExperimentForFeatureFlags = [:]
+        activeExperimentForFeatureFlags: ActiveExperimentForFeatureFlags = [:],
+        agentModeAutoApproval: Bool = true
     ) {
         self.restrictedTelemetry = restrictedTelemetry
         self.snippy = snippy
@@ -60,6 +62,7 @@ public struct FeatureFlags: Hashable, Codable {
         self.byok = byok
         self.editorPreviewFeatures = editorPreviewFeatures
         self.activeExperimentForFeatureFlags = activeExperimentForFeatureFlags
+        self.agentModeAutoApproval = agentModeAutoApproval
     }
 }
 
@@ -91,11 +94,10 @@ public class FeatureFlagNotifierImpl: FeatureFlagNotifier {
     }
     
     private func updateFeatureFlags() {
-        let xcodeChat = self.didChangeFeatureFlagsParams.envelope["xcode_chat"]?.boolValue != false
         let chatEnabled = self.didChangeFeatureFlagsParams.envelope["chat_enabled"]?.boolValue != false
         self.featureFlags.restrictedTelemetry = self.didChangeFeatureFlagsParams.token["rt"] != "0"
         self.featureFlags.snippy = self.didChangeFeatureFlagsParams.token["sn"] != "0"
-        self.featureFlags.chat = xcodeChat && chatEnabled
+        self.featureFlags.chat = chatEnabled
         self.featureFlags.inlineChat = chatEnabled
         self.featureFlags.agentMode = self.didChangeFeatureFlagsParams.token["agent_mode"] != "0"
         self.featureFlags.mcp = self.didChangeFeatureFlagsParams.token["mcp"] != "0"
@@ -103,6 +105,7 @@ public class FeatureFlagNotifierImpl: FeatureFlagNotifier {
         self.featureFlags.byok = self.didChangeFeatureFlagsParams.byok != false
         self.featureFlags.editorPreviewFeatures = self.didChangeFeatureFlagsParams.token["editor_preview_features"] != "0"
         self.featureFlags.activeExperimentForFeatureFlags = self.didChangeFeatureFlagsParams.activeExps
+        self.featureFlags.agentModeAutoApproval = self.didChangeFeatureFlagsParams.token["agent_mode_auto_approval"] != "0"
     }
 
     public func handleFeatureFlagNotification(_ didChangeFeatureFlagsParams: DidChangeFeatureFlagsParams) {

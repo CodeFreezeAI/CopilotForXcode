@@ -14,7 +14,7 @@ struct ChatNoAXPermissionView: View {
                         .resizable()
                         .renderingMode(.template)
                         .scaledToFill()
-                        .frame(width: 64.0, height: 64.0)
+                        .scaledFrame(width: 64.0, height: 64.0)
                         .foregroundColor(.primary)
                     
                     Text("Accessibility Permission Required")
@@ -43,7 +43,7 @@ struct ChatNoAXPermissionView: View {
                     maxHeight: .infinity
                 )
             }
-            .xcodeStyleFrame(cornerRadius: 10)
+            .xcodeStyleFrame()
             .ignoresSafeArea(edges: .top)
         }
     }

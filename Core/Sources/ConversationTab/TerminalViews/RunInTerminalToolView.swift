@@ -1,9 +1,11 @@
-import SwiftUI
-import XcodeInspector
-import ConversationServiceProvider
+import ChatService
 import ComposableArchitecture
-import Terminal
+import ConversationServiceProvider
+import GitHubCopilotService
 import SharedUIComponents
+import SwiftUI
+import Terminal
+import XcodeInspector
 
 struct RunInTerminalToolView: View {
     let tool: AgentToolCall
@@ -23,7 +25,10 @@ struct RunInTerminalToolView: View {
     init(tool: AgentToolCall, chat: StoreOf<Chat>) {
         self.tool = tool
         self.chat = chat
-        if let input = tool.invokeParams?.input as? [String: AnyCodable] {
+        
+        let input = (tool.invokeParams?.input as? [String: AnyCodable]) ?? tool.input
+
+        if let input {
             self.command = input["command"]?.value as? String
             self.explanation = input["explanation"]?.value as? String
             self.isBackground = input["isBackground"]?.value as? Bool
@@ -82,7 +87,7 @@ struct RunInTerminalToolView: View {
 
                     toolView
                 }
-                .padding(8)
+                .scaledPadding(8)
                 .cornerRadius(8)
                 .overlay(
                     RoundedRectangle(cornerRadius: 8)
@@ -121,10 +126,12 @@ struct RunInTerminalToolView: View {
                             .scaledFrame(width: 16, height: 16)
 
                         Text(command!)
+                            .lineLimit(nil)
                             .textSelection(.enabled)
                             .scaledFont(size: chatFontSize, design: .monospaced)
-                            .padding(8)
+                            .scaledPadding(8)
                             .frame(maxWidth: .infinity, alignment: .leading)
+                            .fixedSize(horizontal: false, vertical: true)
                             .foregroundStyle(codeForegroundColor)
                             .background(codeBackgroundColor)
                             .clipShape(RoundedRectangle(cornerRadius: 6))
@@ -141,27 +148,212 @@ struct RunInTerminalToolView: View {
                         terminalSession: terminalSession,
                         onTerminalInput: terminalSession.handleTerminalInput
                     )
-                    .frame(minHeight: 200, maxHeight: 400)
+                    .scaledFrame(minHeight: 200, maxHeight: 400)
                 } else if tool.status == .waitForConfirmation {
                     ThemedMarkdownText(text: explanation ?? "", chat: chat)
                         .frame(maxWidth: .infinity, alignment: .leading)
 
                     HStack {
-                        Button("Cancel") {
+                        Button(action: {
                             chat.send(.toolCallCancelled(tool.id))
+                        }) {
+                            Text("Skip")
+                                .scaledFont(.body)
                         }
-                        .scaledFont(.body)
 
-                        Button("Continue") {
-                            chat.send(.toolCallAccepted(tool.id))
+                        if FeatureFlagNotifierImpl.shared.featureFlags.agentModeAutoApproval &&
+                           CopilotPolicyNotifierImpl.shared.copilotPolicy.agentModeAutoApprovalEnabled,
+                           let command, !command.isEmpty {
+                            SplitButton(
+                                title: "Allow",
+                                isDisabled: false,
+                                primaryAction: {
+                                    chat.send(.toolCallAccepted(tool.id))
+                                },
+                                menuItems: terminalMenuItems(command: command),
+                                style: .prominent
+                            )
+                        } else {
+                            Button(action: {
+                                chat.send(.toolCallAccepted(tool.id))
+                            }) {
+                                Text("Allow")
+                                    .scaledFont(.body)
+                            }
+                            .buttonStyle(BorderedProminentButtonStyle())
                         }
-                        .scaledFont(.body)
-                        .buttonStyle(BorderedProminentButtonStyle())
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.top, 4)
+                    .scaledPadding(.top, 4)
                 }
             }
         }
+    }
+
+    private func terminalMenuItems(command: String) -> [SplitButtonMenuItem] {
+        var items: [SplitButtonMenuItem] = []
+
+        let subCommands = ToolAutoApprovalManager.extractSubCommandsWithTreeSitter(command)
+        let commandNames = extractCommandNamesForMenu(subCommands)
+        let commandNamesLabel = formatCommandNameListForMenu(commandNames)
+
+        let trimmedCommand = command.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedSubCommands = subCommands
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        let shouldShowExactCommandLineItems = !(
+            trimmedSubCommands.count == 1 &&
+                trimmedSubCommands[0] == trimmedCommand &&
+                commandNames.contains(trimmedCommand)
+        )
+        
+        let conversationId = tool.invokeParams?.conversationId ?? ""
+        let hasConversationId = !conversationId.isEmpty
+
+        // Session-scoped
+        if hasConversationId, !commandNames.isEmpty {
+            items.append(
+                SplitButtonMenuItem(title: sessionAllowCommandsTitle(commandNamesLabel: commandNamesLabel, commandCount: commandNames.count)) {
+                    chat.send(
+                        .toolCallAcceptedWithApproval(
+                            tool.id,
+                            .terminal(
+                                scope: .session(conversationId),
+                                commands: commandNames
+                            )
+                        )
+                    )
+                }
+            )
+        }
+
+        // Global
+        if !commandNames.isEmpty {
+            items.append(
+                SplitButtonMenuItem(title: alwaysAllowCommandsTitle(commandNamesLabel: commandNamesLabel, commandCount: commandNames.count)) {
+                    chat.send(
+                        .toolCallAcceptedWithApproval(
+                            tool.id,
+                            .terminal(
+                                scope: .global,
+                                commands: commandNames
+                            )
+                        )
+                    )
+                }
+            )
+        }
+
+        items.append(.divider())
+
+        if shouldShowExactCommandLineItems {
+            // Session-scoped exact command line
+            if hasConversationId {
+                items.append(
+                    SplitButtonMenuItem(title: "Allow Exact Command Line in this Session") {
+                        chat.send(
+                            .toolCallAcceptedWithApproval(
+                                tool.id,
+                                .terminal(
+                                    scope: .session(conversationId),
+                                    commands: [command]
+                                )
+                            )
+                        )
+                    }
+                )
+            }
+
+            // Global exact command line
+            items.append(
+                SplitButtonMenuItem(title: "Always Allow Exact Command Line") {
+                    chat.send(
+                        .toolCallAcceptedWithApproval(
+                            tool.id,
+                            .terminal(
+                                scope: .global,
+                                commands: [command]
+                            )
+                        )
+                    )
+                }
+            )
+
+            items.append(.divider())
+        }
+
+        // Session-scoped allow all
+        if hasConversationId {
+            items.append(
+                SplitButtonMenuItem(title: "Allow All Commands in this Session") {
+                    chat.send(
+                        .toolCallAcceptedWithApproval(
+                            tool.id,
+                            .terminal(
+                                scope: .session(conversationId),
+                                commands: []
+                            )
+                        )
+                    )
+                }
+            )
+        }
+
+        items.append(.divider())
+        items.append(
+            SplitButtonMenuItem(title: "Configure Auto Approve...") {
+                chat.send(.openAutoApproveSettings)
+            }
+        )
+
+        return items
+    }
+
+    private func formatSubCommandListForMenu(_ subCommands: [String]) -> String {
+        let trimmed = subCommands.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        guard !trimmed.isEmpty else { return "(none)" }
+        return trimmed.joined(separator: ", ")
+    }
+
+    private func extractCommandNamesForMenu(_ subCommands: [String]) -> [String] {
+        var result: [String] = []
+        var seen: Set<String> = []
+
+        for subCommand in subCommands {
+            guard let name = ToolAutoApprovalManager.extractTerminalCommandName(fromSubCommand: subCommand) else {
+                continue
+            }
+            let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            guard !seen.contains(trimmed) else { continue }
+            seen.insert(trimmed)
+            result.append(trimmed)
+        }
+
+        return result
+    }
+
+    private func formatCommandNameListForMenu(_ commandNames: [String]) -> String {
+        let trimmed = commandNames.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        guard !trimmed.isEmpty else { return "(none)" }
+
+        func suffixEllipsis(_ name: String) -> String { "`\(name) ...`" }
+
+        return trimmed.map(suffixEllipsis).joined(separator: ", ")
+    }
+
+    private func sessionAllowCommandsTitle(commandNamesLabel: String, commandCount: Int) -> String {
+        if commandCount == 1 {
+            return "Allow \(commandNamesLabel) in this Session"
+        }
+        return "Allow Commands \(commandNamesLabel) in this Session"
+    }
+
+    private func alwaysAllowCommandsTitle(commandNamesLabel: String, commandCount: Int) -> String {
+        if commandCount == 1 {
+            return "Always Allow \(commandNamesLabel)"
+        }
+        return "Always Allow Commands \(commandNamesLabel)"
     }
 }

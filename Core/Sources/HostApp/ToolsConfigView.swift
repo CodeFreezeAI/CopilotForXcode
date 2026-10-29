@@ -1,90 +1,117 @@
 import Client
+import ComposableArchitecture
+import ConversationServiceProvider
 import Foundation
+import GitHubCopilotService
 import Logger
+import Persist
 import SharedUIComponents
 import SwiftUI
+import SystemUtils
 import Toast
-import ConversationServiceProvider
-import GitHubCopilotService
-import ComposableArchitecture
 
 struct MCPConfigView: View {
     @State private var mcpConfig: String = ""
     @Environment(\.toast) var toast
+    @ObservedObject private var featureFlags = FeatureFlagManager.shared
+    @ObservedObject private var copilotPolicy = CopilotPolicyManager.shared
     @State private var configFilePath: String = mcpConfigFilePath
     @State private var isMonitoring: Bool = false
     @State private var lastModificationDate: Date? = nil
     @State private var fileMonitorTask: Task<Void, Error>? = nil
-    @State private var isMCPFFEnabled = false
-    @State private var selectedOption = ToolType.MCP
+    @State private var selectedMode: ConversationMode = .defaultAgent
     @Environment(\.colorScheme) var colorScheme
 
-    private static var lastSyncTimestamp: Date? = nil
-    
-    enum ToolType: String, CaseIterable, Identifiable {
-        case MCP, BuiltIn
-        var id: Self { self }
+    private var isCustomAgentEnabled: Bool {
+        copilotPolicy.isCustomAgentEnabled
     }
+
+    private static var lastSyncTimestamp: Date? = nil
+    @State private var debounceTimer: Timer?
+    private static let refreshDebounceInterval: TimeInterval = 1.0 // 1.0 second debounce
 
     var body: some View {
         WithPerceptionTracking {
             ScrollView {
-                Picker("", selection: $selectedOption) {
-                    Text("MCP").tag(ToolType.MCP)
-                    Text("Built-In").tag(ToolType.BuiltIn)
+                Picker("", selection: Binding(
+                    get: { hostAppStore.state.activeToolsSubTab },
+                    set: { hostAppStore.send(.setActiveToolsSubTab($0)) }
+                )) {
+                    if #available(macOS 26.0, *) {
+                        Text("MCP".padded(centerTo: 24, with: "\u{2002}")).tag(ToolsSubTab.MCP)
+                        Text("Built-In".padded(centerTo: 24, with: "\u{2002}")).tag(ToolsSubTab.BuiltIn)
+                        Text("Auto-Approve".padded(centerTo: 24, with: "\u{2002}")).tag(ToolsSubTab.AutoApprove)
+                    } else {
+                        Text("MCP").tag(ToolsSubTab.MCP)
+                        Text("Built-In").tag(ToolsSubTab.BuiltIn)
+                        Text("Auto-Approve").tag(ToolsSubTab.AutoApprove)
+                    }
                 }
-                .pickerStyle(.segmented)
                 .frame(width: 400)
-                
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .padding(.top, 12)
+                .padding(.bottom, 4)
+
                 Group {
-                    if selectedOption == .MCP {
+                    if hostAppStore.activeToolsSubTab == .MCP {
                         VStack(alignment: .leading, spacing: 8) {
-                            MCPIntroView(isMCPFFEnabled: $isMCPFFEnabled)
-                            if isMCPFFEnabled {
+                            MCPIntroView(isMCPFFEnabled: featureFlags.isMCPEnabled)
+                            if featureFlags.isMCPEnabled {
                                 MCPManualInstallView()
-                                MCPToolsListView()
+
+                                if featureFlags.isEditorPreviewEnabled {
+                                    MCPRegistryURLView()
+                                }
+
+                                MCPXcodeServerInstallView()
+
+                                MCPToolsListView(
+                                    selectedMode: $selectedMode,
+                                    isCustomAgentEnabled: isCustomAgentEnabled
+                                )
+
+                                HStack {
+                                    Spacer()
+                                    AdaptiveHelpLink(action: { NSWorkspace.shared.open(
+                                        URL(string: "https://modelcontextprotocol.io/introduction")!
+                                    ) })
+                                }
                             }
                         }
                         .onAppear {
                             setupConfigFilePath()
-                            Task {
-                                await updateMCPFeatureFlag()
+                            if featureFlags.isMCPEnabled {
+                                startMonitoringConfigFile()
                             }
                         }
                         .onDisappear {
                             stopMonitoringConfigFile()
                         }
-                        .onChange(of: isMCPFFEnabled) { newMCPFFEnabled in
+                        .onChange(of: featureFlags.isMCPEnabled) { newMCPFFEnabled in
                             if newMCPFFEnabled {
                                 startMonitoringConfigFile()
-                                refreshConfiguration(())
+                                refreshConfiguration()
                             } else {
                                 stopMonitoringConfigFile()
                             }
                         }
-                        .onReceive(DistributedNotificationCenter.default()
-                            .publisher(for: .gitHubCopilotFeatureFlagsDidChange)) { _ in
-                                Task {
-                                    await updateMCPFeatureFlag()
-                                }
+                        .onChange(of: isCustomAgentEnabled) { isEnabled in
+                            if !isEnabled && !selectedMode.isDefaultAgent {
+                                selectedMode = .defaultAgent
                             }
+                        }
+                    } else if hostAppStore.activeToolsSubTab == .BuiltIn {
+                        BuiltInToolsListView(
+                            selectedMode: $selectedMode,
+                            isCustomAgentEnabled: isCustomAgentEnabled
+                        )
                     } else {
-                        BuiltInToolsListView()
+                        AutoApproveContainerView()
                     }
                 }
-                .padding(20)
+                .padding(.horizontal, 20)
             }
-        }
-    }
-    
-    private func updateMCPFeatureFlag() async {
-        do {
-            let service = try getService()
-            if let featureFlags = try await service.getCopilotFeatureFlags() {
-                isMCPFFEnabled = featureFlags.mcp
-            }
-        } catch {
-            Logger.client.error("Failed to get copilot feature flags: \(error)")
         }
     }
 
@@ -101,7 +128,7 @@ struct MCPConfigView: View {
             try? """
             {
                 "servers": {
-                    
+
                 }
             }
             """.write(to: configFileURL, atomically: true, encoding: .utf8)
@@ -153,48 +180,56 @@ struct MCPConfigView: View {
     }
 
     private func startMonitoringConfigFile() {
-        stopMonitoringConfigFile()  // Stop existing monitoring if any
+        stopMonitoringConfigFile() // Stop existing monitoring if any
 
         isMonitoring = true
+        Logger.client.info("Starting MCP config file monitoring")
 
         fileMonitorTask = Task {
             let configFileURL = URL(fileURLWithPath: configFilePath)
 
             // Check for file changes periodically
             while isMonitoring {
-                try? await Task.sleep(nanoseconds: 3_000_000_000)  // Check every 3 seconds
+                try? await Task.sleep(nanoseconds: 3_000_000_000) // Check every 3 second for better responsiveness
+
+                guard isMonitoring else { break } // Extra check after sleep
 
                 let currentDate = getFileModificationDate(url: configFileURL)
 
                 if let currentDate = currentDate, currentDate != lastModificationDate {
                     // File modification date has changed, update our record
+                    Logger.client.info("MCP config file change detected")
                     lastModificationDate = currentDate
 
                     // Read and validate the updated content
                     if let validJson = readAndValidateJSON(from: configFileURL) {
                         await MainActor.run {
                             mcpConfig = validJson
-                            refreshConfiguration(validJson)
+                            refreshConfiguration()
                             toast("MCP configuration file updated", .info)
                         }
                     } else {
                         // If JSON is invalid, show error
                         await MainActor.run {
                             toast("Invalid JSON in MCP configuration file", .error)
+                            Logger.client.info("Invalid JSON detected during monitoring")
                         }
                     }
                 }
             }
+            Logger.client.info("Stopped MCP config file monitoring")
         }
     }
 
     private func stopMonitoringConfigFile() {
+        guard isMonitoring else { return }
+        Logger.client.info("Stopping MCP config file monitoring")
         isMonitoring = false
         fileMonitorTask?.cancel()
         fileMonitorTask = nil
     }
 
-    func refreshConfiguration(_: Any) {
+    func refreshConfiguration() {
         if MCPConfigView.lastSyncTimestamp == lastModificationDate {
             return
         }
@@ -206,22 +241,35 @@ struct MCPConfigView: View {
             UserDefaults.shared.set(jsonString, for: \.gitHubCopilotMCPConfig)
         }
 
-        Task {
-            do {
-                let service = try getService()
-                try await service.postNotification(
-                    name: Notification.Name
-                        .gitHubCopilotShouldRefreshEditorInformation.rawValue
-                )
-                toast("MCP configuration updated", .info)
-            } catch {
-                toast(error.localizedDescription, .error)
+        // Debounce the refresh notification to avoid sending too frequently
+        debounceTimer?.invalidate()
+        debounceTimer = Timer.scheduledTimer(withTimeInterval: MCPConfigView.refreshDebounceInterval, repeats: false) { _ in
+            Task {
+                do {
+                    let service = try getService()
+                    try await service.postNotification(
+                        name: Notification.Name
+                            .gitHubCopilotShouldRefreshEditorInformation.rawValue
+                    )
+                    await MainActor.run {
+                        toast("Fetching MCP tools...", .info)
+                    }
+                } catch {
+                    await MainActor.run {
+                        toast(error.localizedDescription, .error)
+                    }
+                }
             }
         }
     }
 }
 
-#Preview {
-    MCPConfigView()
-        .frame(width: 800, height: 600)
+extension String {
+    func padded(centerTo total: Int, with pad: Character = " ") -> String {
+        guard count < total else { return self }
+        let deficit = total - count
+        let left = deficit / 2
+        let right = deficit - left
+        return String(repeating: pad, count: left) + self + String(repeating: pad, count: right)
+    }
 }

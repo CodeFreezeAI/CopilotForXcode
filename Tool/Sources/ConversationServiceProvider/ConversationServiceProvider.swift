@@ -4,31 +4,40 @@ import CodableWrappers
 import LanguageServerProtocol
 
 public protocol ConversationServiceType {
-    func createConversation(_ request: ConversationRequest, workspace: WorkspaceInfo) async throws
-    func createTurn(with conversationId: String, request: ConversationRequest, workspace: WorkspaceInfo) async throws
+    func createConversation(_ request: ConversationRequest, workspace: WorkspaceInfo) async throws -> ConversationCreateResponse?
+    func createTurn(with conversationId: String, request: ConversationRequest, workspace: WorkspaceInfo) async throws -> ConversationCreateResponse?
+    func deleteTurn(with conversationId: String, turnId: String, workspace: WorkspaceInfo) async throws
     func cancelProgress(_ workDoneToken: String, workspace: WorkspaceInfo) async throws
     func rateConversation(turnId: String, rating: ConversationRating, workspace: WorkspaceInfo) async throws
     func copyCode(request: CopyCodeRequest, workspace: WorkspaceInfo) async throws
     func templates(workspace: WorkspaceInfo) async throws -> [ChatTemplate]?
+    func modes(workspace: WorkspaceInfo) async throws -> [ConversationMode]?
     func models(workspace: WorkspaceInfo) async throws -> [CopilotModel]?
     func notifyDidChangeWatchedFiles(_ event: DidChangeWatchedFilesEvent, workspace: WorkspaceInfo) async throws
     func agents(workspace: WorkspaceInfo) async throws -> [ChatAgent]?
     func notifyChangeTextDocument(fileURL: URL, content: String, version: Int, workspace: WorkspaceInfo) async throws
-    func reviewChanges(workspace: WorkspaceInfo, params: ReviewChangesParams) async throws -> CodeReviewResult?
+    func reviewChanges(
+        workspace: WorkspaceInfo,
+        changes: [ReviewChangesParams.Change]
+    ) async throws -> CodeReviewResult?
+    func generateThinkingTitle(workspace: WorkspaceInfo, params: GenerateThinkingTitleParams) async throws -> GenerateThinkingTitleResponse?
 }
 
 public protocol ConversationServiceProvider {
-    func createConversation(_ request: ConversationRequest, workspaceURL: URL?) async throws
-    func createTurn(with conversationId: String, request: ConversationRequest, workspaceURL: URL?) async throws
+    func createConversation(_ request: ConversationRequest, workspaceURL: URL?) async throws -> ConversationCreateResponse?
+    func createTurn(with conversationId: String, request: ConversationRequest, workspaceURL: URL?) async throws -> ConversationCreateResponse?
+    func deleteTurn(with conversationId: String, turnId: String, workspaceURL: URL?) async throws
     func stopReceivingMessage(_ workDoneToken: String, workspaceURL: URL?) async throws
     func rateConversation(turnId: String, rating: ConversationRating, workspaceURL: URL?) async throws
     func copyCode(_ request: CopyCodeRequest, workspaceURL: URL?) async throws
     func templates() async throws -> [ChatTemplate]?
+    func modes() async throws -> [ConversationMode]?
     func models() async throws -> [CopilotModel]?
     func notifyDidChangeWatchedFiles(_ event: DidChangeWatchedFilesEvent, workspace: WorkspaceInfo) async throws
     func agents() async throws -> [ChatAgent]?
     func notifyChangeTextDocument(fileURL: URL, content: String, version: Int, workspaceURL: URL?) async throws
-    func reviewChanges(_ params: ReviewChangesParams) async throws -> CodeReviewResult?
+    func reviewChanges(_ changes: [ReviewChangesParams.Change]) async throws -> CodeReviewResult?
+    func generateThinkingTitle(_ params: GenerateThinkingTitleParams) async throws -> GenerateThinkingTitleResponse?
 }
 
 public struct ConversationFileReference: Hashable, Codable, Equatable {
@@ -337,8 +346,10 @@ public struct ConversationRequest {
     public var references: [ConversationAttachedReference]?
     public var model: String?
     public var modelProviderName: String?
+    public var reasoningEffort: String?
     public var turns: [TurnSchema]
     public var agentMode: Bool = false
+    public var customChatModeId: String? = nil
     public var userLanguage: String? = nil
     public var turnId: String? = nil
 
@@ -353,8 +364,10 @@ public struct ConversationRequest {
         references: [ConversationAttachedReference]? = nil,
         model: String? = nil,
         modelProviderName: String? = nil,
+        reasoningEffort: String? = nil,
         turns: [TurnSchema] = [],
         agentMode: Bool = false,
+        customChatModeId: String? = nil,
         userLanguage: String?,
         turnId: String? = nil
     ) {
@@ -368,8 +381,10 @@ public struct ConversationRequest {
         self.references = references
         self.model = model
         self.modelProviderName = modelProviderName
+        self.reasoningEffort = reasoningEffort
         self.turns = turns
         self.agentMode = agentMode
+        self.customChatModeId = customChatModeId
         self.userLanguage = userLanguage
         self.turnId = turnId
     }
@@ -441,6 +456,146 @@ public struct ConversationProgressStep: Codable, Equatable, Identifiable {
     }
 }
 
+public struct Thinking: Codable, Equatable {
+    public let id: String
+    public let text: [String]?
+    public let encrypted: String?
+
+    public init(id: String, text: [String]?, encrypted: String?) {
+        self.id = id
+        self.text = text
+        self.encrypted = encrypted
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        encrypted = try container.decodeIfPresent(String.self, forKey: .encrypted)
+        text = try container.decodeStringOrArray(forKey: .text)
+    }
+}
+
+/// Internal, message-level thinking state.
+///
+/// Distinct from the wire/server `Thinking` payload above: that type carries deltas
+/// streamed from the LSP, while `MessageThinking` is the accumulated UI state stored on
+/// a `ChatMessage` (or `AgentRound`) and persisted across sessions. `isComplete` is a
+/// UI/state flag the server never sends — it's set when a thinking block ends.
+public struct MessageThinking: Codable, Equatable {
+    /// Stable client-generated key for this entry. Survives server delta `id` churn (e.g.
+    /// CodeX models emit a new `id` per delta) and is what the seal/title-attach code paths
+    /// look up. Persisted; older saved messages without it get a fresh UUID on decode.
+    public var clientEntryId: UUID
+    public var id: String
+    public var text: [String]?
+    public var encrypted: String?
+    public var title: String?
+    public var isComplete: Bool
+
+    public init(
+        clientEntryId: UUID = UUID(),
+        id: String,
+        text: [String]?,
+        encrypted: String?,
+        title: String? = nil,
+        isComplete: Bool = false
+    ) {
+        self.clientEntryId = clientEntryId
+        self.id = id
+        self.text = text
+        self.encrypted = encrypted
+        self.title = title
+        self.isComplete = isComplete
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        clientEntryId = try container.decodeIfPresent(UUID.self, forKey: .clientEntryId) ?? UUID()
+        id = try container.decode(String.self, forKey: .id)
+        encrypted = try container.decodeIfPresent(String.self, forKey: .encrypted)
+        title = try container.decodeIfPresent(String.self, forKey: .title)
+        isComplete = try container.decodeIfPresent(Bool.self, forKey: .isComplete) ?? false
+        text = try container.decodeStringOrArray(forKey: .text)
+    }
+
+    public init(from server: Thinking, clientEntryId: UUID = UUID(), isComplete: Bool = false) {
+        self.clientEntryId = clientEntryId
+        self.id = server.id
+        self.text = server.text
+        self.encrypted = server.encrypted
+        self.title = nil
+        self.isComplete = isComplete
+    }
+
+    /// Parses thinking text into title-paired sections.
+    ///
+    /// Each "title-only" line (`**Title**` on its own) starts a new section. All lines that
+    /// follow up to the next title (or end of text) become that section's body. Lines before
+    /// any title go into a leading section with `title == nil`.
+    public static func parseSections(from raw: String) -> [ThinkingSection] {
+        if raw.isEmpty { return [] }
+        var sections: [ThinkingSection] = []
+        var currentTitle: String? = nil
+        var currentBody: [String] = []
+
+        func flush() {
+            let body = currentBody.joined().trimmingCharacters(in: .whitespacesAndNewlines)
+            if currentTitle != nil || !body.isEmpty {
+                sections.append(ThinkingSection(title: currentTitle, body: body))
+            }
+        }
+
+        for line in raw.components(separatedBy: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("**"), trimmed.hasSuffix("**"), trimmed.count > 4 {
+                let inner = String(trimmed.dropFirst(2).dropLast(2))
+                if !inner.isEmpty, !inner.contains("*") {
+                    flush()
+                    currentTitle = inner
+                    currentBody = []
+                    continue
+                }
+            }
+            currentBody.append(line + "\n")
+        }
+        flush()
+        return sections
+    }
+}
+
+public struct ThinkingSection: Equatable {
+    public let title: String?
+    public let body: String
+
+    public init(title: String?, body: String) {
+        self.title = title
+        self.body = body
+    }
+}
+
+public extension KeyedDecodingContainer {
+    /// Decodes a value that the wire format may emit as either a single `String` or `[String]`,
+    /// normalizing to `[String]?`. Returns `nil` if the key is absent.
+    func decodeStringOrArray(forKey key: Key) throws -> [String]? {
+        if let single = try? decode(String.self, forKey: key) {
+            return [single]
+        }
+        return try decodeIfPresent([String].self, forKey: key)
+    }
+}
+
+public struct ContextSizeInfo: Codable, Equatable {
+    public let totalTokenLimit: Int
+    public let systemPromptTokens: Int
+    public let toolDefinitionTokens: Int
+    public let userMessagesTokens: Int
+    public let assistantMessagesTokens: Int
+    public let attachedFilesTokens: Int
+    public let toolResultsTokens: Int
+    public let totalUsedTokens: Int
+    public let utilizationPercentage: Double
+}
+
 public struct DidChangeWatchedFilesEvent: Codable {
     public var workspaceUri: String
     public var changes: [FileEvent]
@@ -448,39 +603,5 @@ public struct DidChangeWatchedFilesEvent: Codable {
     public init(workspaceUri: String, changes: [FileEvent]) {
         self.workspaceUri = workspaceUri
         self.changes = changes
-    }
-}
-
-public struct AgentRound: Codable, Equatable {
-    public let roundId: Int
-    public var reply: String
-    public var toolCalls: [AgentToolCall]?
-    
-    public init(roundId: Int, reply: String, toolCalls: [AgentToolCall]? = []) {
-        self.roundId = roundId
-        self.reply = reply
-        self.toolCalls = toolCalls
-    }
-}
-
-public struct AgentToolCall: Codable, Equatable, Identifiable {
-    public let id: String
-    public let name: String
-    public var progressMessage: String?
-    public var status: ToolCallStatus
-    public var error: String?
-    public var invokeParams: InvokeClientToolParams?
-    
-    public enum ToolCallStatus: String, Codable {
-        case waitForConfirmation, accepted, running, completed, error, cancelled
-    }
-
-    public init(id: String, name: String, progressMessage: String? = nil, status: ToolCallStatus, error: String? = nil, invokeParams: InvokeClientToolParams? = nil) {
-        self.id = id
-        self.name = name
-        self.progressMessage = progressMessage
-        self.status = status
-        self.error = error
-        self.invokeParams = invokeParams
     }
 }

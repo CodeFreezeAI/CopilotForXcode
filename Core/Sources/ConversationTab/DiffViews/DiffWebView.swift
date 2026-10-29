@@ -3,6 +3,7 @@ import ChatService
 import SwiftUI
 import WebKit
 import Logger
+import ChatAPIService
 
 struct DiffWebView: NSViewRepresentable {
     @Perception.Bindable var chat: StoreOf<Chat>

@@ -30,7 +30,9 @@ public protocol ChatServiceType {
         references: [ConversationAttachedReference],
         model: String?,
         modelProviderName: String?,
+        reasoningEffort: String?,
         agentMode: Bool,
+        customChatModeId: String?,
         userLanguage: String?,
         turnId: String?
     ) async throws
@@ -48,51 +50,29 @@ struct ToolCallRequest {
     let completion: (AnyJSONRPCResponse) -> Void
 }
 
-public struct FileEdit: Equatable {
+struct ConversationTurnTrackingState {
+    var turnParentMap: [String: String] = [:] // Maps subturn ID to parent turn ID
+    var validConversationIds: Set<String> = [] // Tracks all valid conversation IDs including subagents
     
-    public enum Status: String {
-        case none = "none"
-        case kept = "kept"
-        case undone = "undone"
-    }
-    
-    public let fileURL: URL
-    public let originalContent: String
-    public var modifiedContent: String
-    public var status: Status
-    
-    /// Different toolName, the different undo logic. Like `insert_edit_into_file` and `create_file`
-    public var toolName: ToolName
-    
-    public init(
-        fileURL: URL,
-        originalContent: String,
-        modifiedContent: String,
-        status: Status = .none,
-        toolName: ToolName
-    ) {
-        self.fileURL = fileURL
-        self.originalContent = originalContent
-        self.modifiedContent = modifiedContent
-        self.status = status
-        self.toolName = toolName
+    mutating func reset() {
+        turnParentMap.removeAll()
+        validConversationIds.removeAll()
     }
 }
 
 public final class ChatService: ChatServiceType, ObservableObject {
     
-    public enum RequestType: String, Equatable {
-        case conversation, codeReview
-    }
-    
     public var memory: ContextAwareAutoManagedChatMemory
     @Published public internal(set) var chatHistory: [ChatMessage] = []
     @Published public internal(set) var isReceivingMessage = false
+    @Published public internal(set) var isSummarizingConversation = false
     @Published public internal(set) var fileEditMap: OrderedDictionary<URL, FileEdit> = [:]
+    @Published public internal(set) var contextSizeInfo: ContextSizeInfo? = nil
     public internal(set) var requestType: RequestType? = nil
     public private(set) var chatTabInfo: ChatTabInfo
     private let conversationProvider: ConversationServiceProvider?
     private let conversationProgressHandler: ConversationProgressHandler
+    private let compressionHandler: CompressionHandler
     private let conversationContextHandler: ConversationContextHandler = ConversationContextHandlerImpl.shared
     // sync all the files in the workspace to watch for changes.
     private let watchedFilesHandler: WatchedFilesHandler = WatchedFilesHandlerImpl.shared
@@ -103,13 +83,27 @@ public final class ChatService: ChatServiceType, ObservableObject {
     private var lastUserRequest: ConversationRequest?
     private var isRestored: Bool = false
     private var pendingToolCallRequests: [String: ToolCallRequest] = [:]
+    // Workaround: toolConfirmation request does not have parent turnId
+    private var conversationTurnTracking = ConversationTurnTrackingState()
+
+    /// Single source of truth for an in-flight streaming thinking block. Sealed when the turn ends
+    /// or a non-thinking payload arrives. `clientEntryId` is stable across server delta `id` churn.
+    private struct ActiveThinkingCursor {
+        let clientEntryId: UUID
+        let targetMessageId: String
+        let originTurnId: String
+    }
+    private var activeThinking: ActiveThinkingCursor? = nil
+    
     init(provider: any ConversationServiceProvider,
          memory: ContextAwareAutoManagedChatMemory = ContextAwareAutoManagedChatMemory(),
          conversationProgressHandler: ConversationProgressHandler = ConversationProgressHandlerImpl.shared,
+         compressionHandler: CompressionHandler = CompressionHandlerImpl.shared,
          chatTabInfo: ChatTabInfo) {
         self.memory = memory
         self.conversationProvider = provider
         self.conversationProgressHandler = conversationProgressHandler
+        self.compressionHandler = compressionHandler
         self.chatTabInfo = chatTabInfo
         memory.chatService = self
         
@@ -155,6 +149,19 @@ public final class ChatService: ChatServiceType, ObservableObject {
         conversationProgressHandler.onEnd.sink { [weak self] (token, progress) in
             self?.handleProgressEnd(token: token, progress: progress)
         }.store(in: &cancellables)
+
+        compressionHandler.onCompressionStarted.sink { [weak self] compressionConversationId in
+            guard let self, self.conversationId == compressionConversationId else { return }
+            self.isSummarizingConversation = true
+        }.store(in: &cancellables)
+
+        compressionHandler.onCompressionCompleted.sink { [weak self] completedNotification in
+            guard let self, self.conversationId == completedNotification.conversationId else { return }
+            self.isSummarizingConversation = false
+            if let contextInfo = completedNotification.contextInfo {
+                self.contextSizeInfo = contextInfo
+            }
+        }.store(in: &cancellables)
     }
     
     private func subscribeToConversationContextRequest() {
@@ -170,28 +177,19 @@ public final class ChatService: ChatServiceType, ObservableObject {
 
     private func subscribeToClientToolConfirmationEvent() {
         ClientToolHandlerImpl.shared.onClientToolConfirmationEvent.sink(receiveValue: { [weak self] (request, completion) in
-            guard let params = request.params, params.conversationId == self?.conversationId else { return }
-            let editAgentRounds: [AgentRound] = [
-                AgentRound(roundId: params.roundId,
-                           reply: "",
-                           toolCalls: [
-                            AgentToolCall(id: params.toolCallId, name: params.name, status: .waitForConfirmation, invokeParams: params)
-                           ]
-                          )
-            ]
-            self?.appendToolCallHistory(turnId: params.turnId, editAgentRounds: editAgentRounds)
-            self?.pendingToolCallRequests[params.toolCallId] = ToolCallRequest(
-                requestId: request.id,
-                turnId: params.turnId,
-                roundId: params.roundId,
-                toolCallId: params.toolCallId,
-                completion: completion)
+            self?.handleClientToolConfirmationEvent(request: request, completion: completion)
         }).store(in: &cancellables)
     }
 
     private func subscribeToClientToolInvokeEvent() {
         ClientToolHandlerImpl.shared.onClientToolInvokeEvent.sink(receiveValue: { [weak self] (request, completion) in
-            guard let params = request.params, params.conversationId == self?.conversationId else { return }
+            guard let params = request.params else { return }
+            
+            // Check if this conversationId is valid (main conversation or subagent conversation)
+            guard let validIds = self?.conversationTurnTracking.validConversationIds, validIds.contains(params.conversationId) else {
+                return
+            }
+            
             guard let copilotTool = CopilotToolRegistry.shared.getTool(name: params.name) else {
                 completion(AnyJSONRPCResponse(id: request.id,
                                               result: JSONValue.array([
@@ -207,33 +205,35 @@ public final class ChatService: ChatServiceType, ObservableObject {
                 return
             }
 
-            copilotTool.invokeTool(request, completion: completion, chatHistoryUpdater: self?.appendToolCallHistory, contextProvider: self)
+            _ = copilotTool.invokeTool(request, completion: completion, contextProvider: self)
         }).store(in: &cancellables)
     }
 
-    private func appendToolCallHistory(turnId: String, editAgentRounds: [AgentRound]) {
+    func appendToolCallHistory(turnId: String, editAgentRounds: [AgentRound], fileEdits: [FileEdit] = [], parentTurnId: String? = nil) {
         let chatTabId = self.chatTabInfo.id
         Task {
+            let turnStatus: ChatMessage.TurnStatus? = {
+                guard let round = editAgentRounds.first, let toolCall = round.toolCalls?.first else {
+                    return nil
+                }
+                
+                switch toolCall.status {
+                case .waitForConfirmation: return .waitForConfirmation
+                case .accepted, .running, .completed, .error: return .inProgress
+                case .cancelled: return .cancelled
+                }
+            }()
+            
             let message = ChatMessage(
                 assistantMessageWithId: turnId,
                 chatTabID: chatTabId,
-                editAgentRounds: editAgentRounds
+                editAgentRounds: editAgentRounds,
+                parentTurnId: parentTurnId,
+                fileEdits: fileEdits,
+                turnStatus: turnStatus
             )
 
             await self.memory.appendMessage(message)
-        }
-    }
-    
-    public func updateFileEdits(by fileEdit: FileEdit) {
-        if let existingFileEdit = self.fileEditMap[fileEdit.fileURL] {
-            self.fileEditMap[fileEdit.fileURL] = .init(
-                fileURL: fileEdit.fileURL,
-                originalContent: existingFileEdit.originalContent,
-                modifiedContent: fileEdit.modifiedContent,
-                toolName: existingFileEdit.toolName
-            )
-        } else {
-            self.fileEditMap[fileEdit.fileURL] = fileEdit
         }
     }
 
@@ -251,86 +251,97 @@ public final class ChatService: ChatServiceType, ObservableObject {
     // this will be triggerred in conversation tab if needed
     public func restoreIfNeeded() {
         guard self.isRestored == false else { return }
-        
+
         Task {
-            let storedChatMessages = fetchAllChatMessagesFromStorage()
+            var storedChatMessages = fetchAllChatMessagesFromStorage()
+            // Force-seal any thinking entries that were persisted mid-stream (e.g. app crashed
+            // before the seal sweep ran). Otherwise they'd render with the placeholder "Thinking"
+            // title forever.
+            for messageIndex in storedChatMessages.indices where storedChatMessages[messageIndex].role == .assistant {
+                for path in Self.allThinkingPaths(in: storedChatMessages[messageIndex]) {
+                    Self.mutateThinking(at: path, in: &storedChatMessages[messageIndex]) { entry in
+                        if !entry.isComplete { entry.isComplete = true }
+                    }
+                }
+            }
             await mutateHistory { history in
                 history.append(contentsOf: storedChatMessages)
             }
         }
-        
+
         self.isRestored = true
     }
 
+    /// Updates the status of a tool call (accepted, cancelled, etc.) and notifies the server
+    /// 
+    /// This method handles two key responsibilities:
+    /// 1. Sends confirmation response back to the server when user accepts/cancels
+    /// 2. Updates the tool call status in chat history UI (including subagent tool calls)
     public func updateToolCallStatus(toolCallId: String, status: AgentToolCall.ToolCallStatus, payload: Any? = nil) {
-        if status == .cancelled {
-            resetOngoingRequest()
-            return
-        }
-
-        // Send the tool call result back to the server
-        if let toolCallRequest = self.pendingToolCallRequests[toolCallId], status == .accepted {
+        // Capture the pending request info before removing it from the dictionary
+        let toolCallRequest = self.pendingToolCallRequests[toolCallId]
+        
+        // Step 1: Send confirmation response to server (for accept/cancel actions only)
+        if let toolCallRequest = toolCallRequest, status == .accepted || status == .cancelled {
             self.pendingToolCallRequests.removeValue(forKey: toolCallId)
-            let toolResult = LanguageModelToolConfirmationResult(result: .Accept)
-            let jsonResult = try? JSONEncoder().encode(toolResult)
-            let jsonValue = (try? JSONDecoder().decode(JSONValue.self, from: jsonResult ?? Data())) ?? JSONValue.null
-            toolCallRequest.completion(
-                AnyJSONRPCResponse(
-                    id: toolCallRequest.requestId,
-                    result: JSONValue.array([
-                        jsonValue,
-                        JSONValue.null
-                    ])
-                )
-            )
+            sendToolConfirmationResponse(toolCallRequest, accepted: status == .accepted)
         }
 
-        // Update the tool call status in the chat history
+        // Step 2: Update the tool call status in chat history UI
         Task {
-            guard let lastMessage = await memory.history.last, lastMessage.role == .assistant else {
+            guard let targetMessage = await ToolCallStatusUpdater.findMessageContainingToolCall(
+                toolCallRequest,
+                conversationTurnTracking: conversationTurnTracking,
+                history: await memory.history
+            ) else {
                 return
             }
-
-            var updatedAgentRounds: [AgentRound] = []
-            for i in 0..<lastMessage.editAgentRounds.count {
-                if lastMessage.editAgentRounds[i].toolCalls == nil {
-                    continue
-                }
-                for j in 0..<lastMessage.editAgentRounds[i].toolCalls!.count {
-                    if lastMessage.editAgentRounds[i].toolCalls![j].id == toolCallId {
-                        updatedAgentRounds.append(
-                            AgentRound(roundId: lastMessage.editAgentRounds[i].roundId,
-                                       reply: "",
-                                       toolCalls: [
-                                        AgentToolCall(id: toolCallId,
-                                                      name: lastMessage.editAgentRounds[i].toolCalls![j].name,
-                                                      status: status)
-                                       ]
-                                      )
-                        )
-                        break
-                    }
-                }
-                if !updatedAgentRounds.isEmpty {
-                    break
-                }
-            }
-
-            if !updatedAgentRounds.isEmpty {
-                let message = ChatMessage(
-                    id: lastMessage.id,
-                    chatTabID: lastMessage.chatTabID,
-                    clsTurnID: lastMessage.clsTurnID,
-                    role: .assistant,
-                    content: "",
-                    references: [],
-                    steps: [],
-                    editAgentRounds: updatedAgentRounds
+            
+            // Search for the tool call in main rounds or subagent rounds
+            if let updatedRound = ToolCallStatusUpdater.findAndUpdateToolCall(
+                toolCallId: toolCallId,
+                newStatus: status,
+                in: targetMessage.editAgentRounds
+            ) {
+                let message = ToolCallStatusUpdater.createMessageUpdate(
+                    targetMessage: targetMessage,
+                    updatedRound: updatedRound
                 )
-
-                await self.memory.appendMessage(message)
+                await memory.appendMessage(message)
             }
         }
+    }
+    
+    // MARK: - Helper Methods for Tool Call Status Updates
+
+    /// Returns true if the `conversationId` belongs to the active conversation or any subagent conversations.
+    func isConversationIdValid(_ conversationId: String) -> Bool {
+        conversationTurnTracking.validConversationIds.contains(conversationId)
+    }
+
+    /// Workaround: toolConfirmation request does not have parent turnId.
+    func parentTurnIdForTurnId(_ turnId: String) -> String? {
+        conversationTurnTracking.turnParentMap[turnId]
+    }
+
+    func storePendingToolCallRequest(toolCallId: String, request: ToolCallRequest) {
+        pendingToolCallRequests[toolCallId] = request
+    }
+    
+    /// Sends the confirmation response (accept/dismiss) back to the server
+    func sendToolConfirmationResponse(_ request: ToolCallRequest, accepted: Bool) {
+        let toolResult = LanguageModelToolConfirmationResult(
+            result: accepted ? .Accept : .Dismiss
+        )
+        let jsonResult = try? JSONEncoder().encode(toolResult)
+        let jsonValue = (try? JSONDecoder().decode(JSONValue.self, from: jsonResult ?? Data())) ?? JSONValue.null
+        
+        request.completion(
+            AnyJSONRPCResponse(
+                id: request.requestId,
+                result: JSONValue.array([jsonValue, JSONValue.null])
+            )
+        )
     }
     
     public enum ChatServiceError: Error, LocalizedError {
@@ -353,7 +364,9 @@ public final class ChatService: ChatServiceType, ObservableObject {
         references: [ConversationAttachedReference],
         model: String? = nil,
         modelProviderName: String? = nil,
+        reasoningEffort: String? = nil,
         agentMode: Bool = false,
+        customChatModeId: String? = nil,
         userLanguage: String? = nil,
         turnId: String? = nil
     ) async throws {
@@ -458,7 +471,9 @@ public final class ChatService: ChatServiceType, ObservableObject {
             references: references,
             model: model,
             modelProviderName: modelProviderName,
+            reasoningEffort: reasoningEffort,
             agentMode: agentMode,
+            customChatModeId: customChatModeId,
             userLanguage: userLanguage,
             turnId: currentTurnId,
             skillSet: validSkillSet
@@ -466,7 +481,18 @@ public final class ChatService: ChatServiceType, ObservableObject {
         
         self.lastUserRequest = request
         self.skillSet = validSkillSet
-        try await sendConversationRequest(request)
+        
+        do {
+            if let response = try await sendConversationRequest(request) {
+                await handleConversationCreateResponse(response)
+            }
+        } catch {
+            // Check if this is a certificate error and show helpful message
+            if isCertificateError(error) {
+                await showCertificateErrorMessage(turnId: currentTurnId)
+            }
+            throw error
+        }
     }
     
     private func createConversationRequest(
@@ -477,7 +503,9 @@ public final class ChatService: ChatServiceType, ObservableObject {
         references: [ConversationAttachedReference],
         model: String? = nil,
         modelProviderName: String? = nil,
+        reasoningEffort: String? = nil,
         agentMode: Bool = false,
+        customChatModeId: String? = nil,
         userLanguage: String? = nil,
         turnId: String? = nil,
         skillSet: [ConversationSkill]
@@ -502,10 +530,26 @@ public final class ChatService: ChatServiceType, ObservableObject {
             references: references,
             model: model,
             modelProviderName: modelProviderName,
+            reasoningEffort: reasoningEffort,
             agentMode: agentMode,
+            customChatModeId: customChatModeId,
             userLanguage: userLanguage,
             turnId: turnId
         )
+    }
+    
+    private func handleConversationCreateResponse(_ response: ConversationCreateResponse) async {
+        await memory.mutateHistory { history in
+            if let index = history.firstIndex(where: { $0.id == response.turnId && $0.role.isAssistant }) {
+                history[index].modelName = response.modelName
+                let modelProviderName = response.modelInfo?.providerName ?? response.modelProviderName
+                history[index].modelProviderName = modelProviderName
+                history[index].billingMultiplier = response.billingMultiplier
+                history[index].reasoningEffort = response.modelInfo?.reasoningEffort
+                
+                self.saveChatMessageToStorage(history[index])
+            }
+        }
     }
 
     public func sendAndWait(_ id: String, content: String) async throws -> String {
@@ -524,9 +568,10 @@ public final class ChatService: ChatServiceType, ObservableObject {
                 print("Failed to cancel ongoing request with WDT: \(activeRequestId)")
             }
         }
-        resetOngoingRequest()
+        resetOngoingRequest(with: .cancelled)
     }
 
+    // Not used
     public func clearHistory() async {
         let messageIds = await memory.history.map { $0.id }
         
@@ -542,10 +587,17 @@ public final class ChatService: ChatServiceType, ObservableObject {
         deleteAllChatMessagesFromStorage(messageIds)
         resetOngoingRequest()
     }
-
-    public func deleteMessage(id: String) async {
-        await memory.removeMessage(id)
-        deleteChatMessageFromStorage(id)
+    
+    public func deleteMessages(ids: [String]) async {
+        let turnIdsFromMessages = await memory.history
+            .filter { ids.contains($0.id) }
+            .compactMap { $0.clsTurnID }
+            .map { String($0) }
+        let turnIds = Array(Set(turnIdsFromMessages))
+        
+        await memory.removeMessages(ids)
+        await deleteTurns(turnIds)
+        deleteAllChatMessagesFromStorage(ids)
     }
 
     public func resendMessage(id: String, model: String? = nil, modelProviderName: String? = nil) async throws {
@@ -563,6 +615,7 @@ public final class ChatService: ChatServiceType, ObservableObject {
                 model: model != nil ? model : lastUserRequest.model,
                 modelProviderName: modelProviderName,
                 agentMode: lastUserRequest.agentMode,
+                customChatModeId: lastUserRequest.customChatModeId,
                 userLanguage: lastUserRequest.userLanguage,
                 turnId: id
             )
@@ -680,8 +733,22 @@ public final class ChatService: ChatServiceType, ObservableObject {
     
     private func handleProgressBegin(token: String, progress: ConversationProgressBegin) {
         guard let workDoneToken = activeRequestId, workDoneToken == token else { return }
-        conversationId = progress.conversationId
+        // Only update conversationId for main turns, not subagent turns
+        // Subagent turns have their own conversation ID which should not replace the parent
+        if progress.parentTurnId == nil {
+            conversationId = progress.conversationId
+        }
+        
+        // Track all valid conversation IDs for the current turn (main conversation + its subturns)
+        conversationTurnTracking.validConversationIds.insert(progress.conversationId)
+        
         let turnId = progress.turnId
+        let parentTurnId = progress.parentTurnId
+        
+        // Track parent-subturn relationship
+        if let parentTurnId = parentTurnId {
+            conversationTurnTracking.turnParentMap[turnId] = parentTurnId
+        }
         
         Task {
             if var lastUserMessage = await memory.history.last(where: { $0.role == .user }) {
@@ -705,10 +772,17 @@ public final class ChatService: ChatServiceType, ObservableObject {
             /// Display an initial assistant message immediately after the user sends a message.
             /// This improves perceived responsiveness, especially in Agent Mode where the first
             /// ProgressReport may take long time.
-            let message = ChatMessage(assistantMessageWithId: turnId, chatTabID: chatTabInfo.id)
+            /// Skip creating a new message for subturns - they will be merged into the parent turn
+            if parentTurnId == nil {
+                let message = ChatMessage(
+                    assistantMessageWithId: turnId, 
+                    chatTabID: chatTabInfo.id, 
+                    turnStatus: .inProgress
+                )
 
-            // will persist in resetOngoingRequest()
-            await memory.appendMessage(message)
+                // will persist in resetOngoingRequest()
+                await memory.appendMessage(message)
+            }
         }
     }
 
@@ -716,38 +790,83 @@ public final class ChatService: ChatServiceType, ObservableObject {
         guard let workDownToken = activeRequestId, workDownToken == token else {
             return
         }
-        
+
+        if let contextSize = progress.contextSize {
+            self.contextSizeInfo = contextSize
+        }
+
         let id = progress.turnId
         var content = ""
         var references: [ConversationReference] = []
         var steps: [ConversationProgressStep] = []
         var editAgentRounds: [AgentRound] = []
+        let parentTurnId = progress.parentTurnId
 
         if let reply = progress.reply {
             content = reply
         }
-        
+
         if let progressReferences = progress.references, !progressReferences.isEmpty {
             references = progressReferences.toConversationReferences()
         }
-        
+
         if let progressSteps = progress.steps, !progressSteps.isEmpty {
             steps = progressSteps
         }
-        
+
         if let progressAgentRounds = progress.editAgentRounds, !progressAgentRounds.isEmpty {
             editAgentRounds = progressAgentRounds
         }
-        
-        if content.isEmpty && references.isEmpty && steps.isEmpty && editAgentRounds.isEmpty {
+
+        let progressThinkingDelta = progress.thinking
+        let hasThinking = !(progressThinkingDelta?.text?.allSatisfy { $0.isEmpty } ?? true)
+        let hasNonThinking = !content.isEmpty || !references.isEmpty || !steps.isEmpty || !editAgentRounds.isEmpty
+
+        // Resolve the in-flight cursor against this event. The cursor is sealed when the active
+        // turn changes, or when a non-thinking payload arrives signalling that reasoning has
+        // ended and the model is now speaking/acting.
+        if let cursor = activeThinking, cursor.originTurnId != id {
+            sealActiveThinking()
+        }
+        if !hasThinking, hasNonThinking, activeThinking != nil {
+            sealActiveThinking()
+        }
+
+        if content.isEmpty && references.isEmpty && steps.isEmpty && editAgentRounds.isEmpty && parentTurnId == nil && !hasThinking {
             return
         }
-        
-        // create immutable copies
+
         let messageContent = content
         let messageReferences = references
         let messageSteps = steps
-        let messageAgentRounds = editAgentRounds
+        var messageAgentRounds = editAgentRounds
+        let messageParentTurnId = parentTurnId
+        var messageThinking: [MessageThinking] = []
+
+        if hasThinking, let progressThinkingDelta {
+            // Open a cursor on the first delta of a streaming block. Subsequent deltas reuse the
+            // same `clientEntryId` so `mergeThinking` concatenates into one entry even when the
+            // server's `id` changes mid-stream.
+            let cursor = activeThinking ?? {
+                let opened = ActiveThinkingCursor(
+                    clientEntryId: UUID(),
+                    targetMessageId: parentTurnId ?? id,
+                    originTurnId: id
+                )
+                activeThinking = opened
+                return opened
+            }()
+            let entry = MessageThinking(from: progressThinkingDelta, clientEntryId: cursor.clientEntryId)
+            // Route the entry: into the last agent round when this event carries one (mid-tool-loop
+            // reasoning, including sub-agent rounds), otherwise onto the message itself (pre-tool
+            // reasoning). For sub-agent events, ChatMemory.appendMessage's parent-turn merge will
+            // forward the round's thinking into the parent's last sub-round via `mergeThinking`.
+            if let lastIndex = messageAgentRounds.indices.last {
+                messageAgentRounds[lastIndex].thinking.append(entry)
+            } else {
+                messageThinking = [entry]
+            }
+        }
 
         Task {
             let message = ChatMessage(
@@ -756,39 +875,188 @@ public final class ChatService: ChatServiceType, ObservableObject {
                 content: messageContent,
                 references: messageReferences,
                 steps: messageSteps,
-                editAgentRounds: messageAgentRounds
+                editAgentRounds: messageAgentRounds,
+                thinking: messageThinking,
+                parentTurnId: messageParentTurnId,
+                turnStatus: .inProgress
             )
 
-            // will persist in resetOngoingRequest()
             await memory.appendMessage(message)
         }
     }
 
+    /// Seals the cursor's entry: marks it `isComplete`, persists the owning message, and kicks off
+    /// the LSP title-generation request. Looking up by `clientEntryId` (set when the cursor was
+    /// opened) makes this independent of the server's per-delta `id` and of which location the
+    /// entry was routed to (top-level message, agent round, or sub-agent round).
+    private func sealActiveThinking() {
+        guard let cursor = activeThinking else { return }
+        activeThinking = nil
+        Task {
+            var sealedText: String? = nil
+            var sealedMessage: ChatMessage? = nil
+            await memory.mutateHistory { history in
+                guard let messageIndex = history.firstIndex(where: { $0.id == cursor.targetMessageId }),
+                      history[messageIndex].role == .assistant,
+                      let path = Self.findThinkingPath(clientEntryId: cursor.clientEntryId, in: history[messageIndex])
+                else { return }
+                Self.mutateThinking(at: path, in: &history[messageIndex]) { entry in
+                    guard !entry.isComplete else { return }
+                    entry.isComplete = true
+                    if let text = entry.text?.joined(), !text.isEmpty {
+                        sealedText = text
+                    }
+                }
+                sealedMessage = history[messageIndex]
+            }
+            if let sealedMessage {
+                saveChatMessageToStorage(sealedMessage)
+            }
+            guard let sealedText else { return }
+            await requestThinkingTitle(for: sealedText, cursor: cursor)
+        }
+    }
+
+    private func requestThinkingTitle(for thinkingText: String, cursor: ActiveThinkingCursor) async {
+        let extractedTitles = MessageThinking.parseSections(from: thinkingText).compactMap { $0.title }
+        let params = GenerateThinkingTitleParams(
+            thinkingContent: extractedTitles.isEmpty ? thinkingText : nil,
+            extractedTitles: extractedTitles.isEmpty ? nil : extractedTitles
+        )
+        do {
+            guard let response = try await conversationProvider?.generateThinkingTitle(params),
+                  !response.title.isEmpty else { return }
+            let trimmed = response.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            let title = trimmed.count > 80 ? String(trimmed.prefix(80)) + "\u{2026}" : trimmed
+            guard !title.isEmpty else { return }
+            var titledMessage: ChatMessage? = nil
+            await memory.mutateHistory { history in
+                guard let messageIndex = history.firstIndex(where: { $0.id == cursor.targetMessageId }),
+                      history[messageIndex].role == .assistant,
+                      let path = Self.findThinkingPath(clientEntryId: cursor.clientEntryId, in: history[messageIndex])
+                else { return }
+                Self.mutateThinking(at: path, in: &history[messageIndex]) { $0.title = title }
+                titledMessage = history[messageIndex]
+            }
+            if let titledMessage {
+                saveChatMessageToStorage(titledMessage)
+            }
+        } catch {
+            Logger.gitHubCopilot.debug("Failed to generate thinking title: \(error)")
+        }
+    }
+
+    /// Path to a `MessageThinking` entry inside an assistant `ChatMessage`. Covers the three
+    /// places thinking can live: top-level on the message, on an agent round, or on a sub-agent
+    /// round under an agent round.
+    private enum ThinkingPath {
+        case message(entryIndex: Int)
+        case round(roundIndex: Int, entryIndex: Int)
+        case subRound(roundIndex: Int, subRoundIndex: Int, entryIndex: Int)
+    }
+
+    private static func findThinkingPath(clientEntryId: UUID, in message: ChatMessage) -> ThinkingPath? {
+        let predicate: (MessageThinking) -> Bool = { $0.clientEntryId == clientEntryId }
+        if let entryIndex = message.thinking.firstIndex(where: predicate) {
+            return .message(entryIndex: entryIndex)
+        }
+        for (roundIndex, round) in message.editAgentRounds.enumerated() {
+            if let entryIndex = round.thinking.firstIndex(where: predicate) {
+                return .round(roundIndex: roundIndex, entryIndex: entryIndex)
+            }
+            for (subRoundIndex, subRound) in (round.subAgentRounds ?? []).enumerated() {
+                if let entryIndex = subRound.thinking.firstIndex(where: predicate) {
+                    return .subRound(roundIndex: roundIndex, subRoundIndex: subRoundIndex, entryIndex: entryIndex)
+                }
+            }
+        }
+        return nil
+    }
+
+    /// All `ThinkingPath`s in the message, in stable visit order. Used by sweeps that need to
+    /// touch every entry without knowing the cursor's `clientEntryId`.
+    private static func allThinkingPaths(in message: ChatMessage) -> [ThinkingPath] {
+        var paths: [ThinkingPath] = []
+        for entryIndex in message.thinking.indices {
+            paths.append(.message(entryIndex: entryIndex))
+        }
+        for (roundIndex, round) in message.editAgentRounds.enumerated() {
+            for entryIndex in round.thinking.indices {
+                paths.append(.round(roundIndex: roundIndex, entryIndex: entryIndex))
+            }
+            for (subRoundIndex, subRound) in (round.subAgentRounds ?? []).enumerated() {
+                for entryIndex in subRound.thinking.indices {
+                    paths.append(.subRound(roundIndex: roundIndex, subRoundIndex: subRoundIndex, entryIndex: entryIndex))
+                }
+            }
+        }
+        return paths
+    }
+
+    private static func mutateThinking(at path: ThinkingPath, in message: inout ChatMessage, _ mutate: (inout MessageThinking) -> Void) {
+        switch path {
+        case .message(let entryIndex):
+            mutate(&message.thinking[entryIndex])
+        case .round(let roundIndex, let entryIndex):
+            mutate(&message.editAgentRounds[roundIndex].thinking[entryIndex])
+        case .subRound(let roundIndex, let subRoundIndex, let entryIndex):
+            guard var subRounds = message.editAgentRounds[roundIndex].subAgentRounds else { return }
+            mutate(&subRounds[subRoundIndex].thinking[entryIndex])
+            message.editAgentRounds[roundIndex].subAgentRounds = subRounds
+        }
+    }
+
+    private func strippingRequestIDs(from message: String) -> String {
+        // "Request ID:" always appears before "GitHub Request ID:", so cutting at the first
+        // occurrence removes both along with the preceding separator (". " or " | ")
+        guard let range = message.range(of: "Request ID:", options: .caseInsensitive) else {
+            return message
+        }
+        return String(message[..<range.lowerBound])
+            .trimmingCharacters(in: CharacterSet(charactersIn: " |\t\n\r"))
+    }
+
     private func handleProgressEnd(token: String, progress: ConversationProgressEnd) {
         guard let workDoneToken = activeRequestId, workDoneToken == token else { return }
+
+        sealActiveThinking()
+
         let followUp = progress.followUp
         
         if let CLSError = progress.error {
             // CLS Error Code 402: reached monthly chat messages limit
             if CLSError.code == 402 {
                 Task {
+                    let selectedModel = lastUserRequest?.model
+                    let selectedModelProviderName = lastUserRequest?.modelProviderName
+                    let isBYOK = selectedModel != nil && selectedModelProviderName != nil
+
+                    var errorMessageText: String
+                    if let selectedModel = selectedModel, let selectedModelProviderName = selectedModelProviderName {
+                        errorMessageText = "You've reached your quota limit for your BYOK model \(selectedModel). Please check with \(selectedModelProviderName) for more information."
+                    } else {
+                        errorMessageText = strippingRequestIDs(from: CLSError.message)
+                    }
+
                     await Status.shared
-                        .updateCLSStatus(.warning, busy: false, message: CLSError.message)
+                        .updateCLSStatus(.warning, busy: false, message: errorMessageText)
                     let errorMessage = ChatMessage(
                         errorMessageWithId: progress.turnId,
                         chatTabID: chatTabInfo.id,
-                        panelMessages: [.init(type: .error, title: String(CLSError.code ?? 0), message: CLSError.message, location: .Panel)]
+                        panelMessages: [.init(type: .error, title: String(CLSError.code ?? 0), message: errorMessageText, location: .Panel)]
                     )
-                    // will persist in resetongoingRequest()
                     await memory.appendMessage(errorMessage)
-                    
-                    if let lastUserRequest,
+
+                    // TBB messages mention "AI Credits" or "additional overages" — no fallback for TBB
+                    let isTBB = !isBYOK && (CLSError.message.contains("AI Credits") || CLSError.message.contains("additional overages"))
+                    if !isTBB,
+                       let lastUserRequest,
                        let currentUserPlan = await Status.shared.currentUserPlan(),
                        currentUserPlan != "free" {
                         guard let fallbackModel = CopilotModelManager.getFallbackLLM(
                             scope: lastUserRequest.agentMode ? .agentPanel : .chatPanel
                         ) else {
-                            resetOngoingRequest()
+                            resetOngoingRequest(with: .error)
                             return
                         }
                         do {
@@ -800,10 +1068,11 @@ public final class ChatService: ChatServiceType, ObservableObject {
                             )
                         } catch {
                             Logger.gitHubCopilot.error(error)
-                            resetOngoingRequest()
+                            resetOngoingRequest(with: .error)
                         }
                         return
                     }
+                    resetOngoingRequest(with: .error)
                 }
             } else if CLSError.code == 400 && CLSError.message.contains("model is not supported") {
                 Task {
@@ -813,19 +1082,25 @@ public final class ChatService: ChatServiceType, ObservableObject {
                         errorMessages: ["Oops, the model is not supported. Please enable it first in [GitHub Copilot settings](https://github.com/settings/copilot)."]
                     )
                     await memory.appendMessage(errorMessage)
-                    resetOngoingRequest()
+                    resetOngoingRequest(with: .error)
                     return
                 }
             } else {
                 Task {
+                    var clsErrorMessage = CLSError.message
+                    if CLSError.code == ConversationErrorCode.toolRoundExceedError.rawValue {
+                        // TODO: Remove this after `Continue` is supported.
+                        clsErrorMessage = HardCodedToolRoundExceedErrorMessage
+                    }
+                    
                     let errorMessage = ChatMessage(
                         errorMessageWithId: progress.turnId,
                         chatTabID: chatTabInfo.id,
-                        errorMessages: [CLSError.message]
+                        errorMessages: [clsErrorMessage]
                     )
                     // will persist in resetOngoingRequest()
                     await memory.appendMessage(errorMessage)
-                    resetOngoingRequest()
+                    resetOngoingRequest(with: .error)
                     return
                 }
             }
@@ -833,21 +1108,30 @@ public final class ChatService: ChatServiceType, ObservableObject {
         
         Task {
             let message = ChatMessage(
-                assistantMessageWithId: progress.turnId, 
+                assistantMessageWithId: progress.turnId,
                 chatTabID: chatTabInfo.id,
                 followUp: followUp,
-                suggestedTitle: progress.suggestedTitle
+                suggestedTitle: progress.suggestedTitle,
+                turnStatus: .success
             )
             // will persist in resetOngoingRequest()
             await memory.appendMessage(message)
-            resetOngoingRequest()
+            resetOngoingRequest(with: .success)
         }
     }
     
-    private func resetOngoingRequest() {
+    private func resetOngoingRequest(with turnStatus: ChatMessage.TurnStatus = .success) {
         activeRequestId = nil
         isReceivingMessage = false
+        isSummarizingConversation = false
         requestType = nil
+        // The cursor is normally cleared by sealActiveThinking() in handleProgressEnd; clear it
+        // here as a safety net for cancellation/error paths that bypass the end handler. The
+        // belt-and-suspenders sweep below catches any orphan unsealed entries.
+        activeThinking = nil
+
+        // Clear turn tracking data
+        conversationTurnTracking.reset()
 
         // cancel all pending tool call requests
         for (_, request) in pendingToolCallRequests {
@@ -878,6 +1162,15 @@ public final class ChatService: ChatServiceType, ObservableObject {
                         history[lastIndex].steps[i].status = .cancelled
                     }
                 }
+
+                // Belt-and-suspenders: mark any orphan unsealed thinking complete on turn end. The
+                // cursor seal in handleProgressEnd handles the normal path; this catches cancel/
+                // error cases that bypass it.
+                for path in Self.allThinkingPaths(in: history[lastIndex]) {
+                    Self.mutateThinking(at: path, in: &history[lastIndex]) { entry in
+                        if !entry.isComplete { entry.isComplete = true }
+                    }
+                }
                 
                 for i in 0..<history[lastIndex].editAgentRounds.count {
                     if history[lastIndex].editAgentRounds[i].toolCalls == nil {
@@ -890,6 +1183,20 @@ public final class ChatService: ChatServiceType, ObservableObject {
                             history[lastIndex].editAgentRounds[i].toolCalls![j].status = .cancelled
                         }
                     }
+                    
+                    // Cancel tool calls in subagent rounds
+                    if let subAgentRounds = history[lastIndex].editAgentRounds[i].subAgentRounds {
+                        for k in 0..<subAgentRounds.count {
+                            if let toolCalls = subAgentRounds[k].toolCalls {
+                                for l in 0..<toolCalls.count {
+                                    if toolCalls[l].status == .running
+                                        || toolCalls[l].status == .waitForConfirmation {
+                                        history[lastIndex].editAgentRounds[i].subAgentRounds![k].toolCalls![l].status = .cancelled
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
                 
                 if history[lastIndex].codeReviewRound != nil,
@@ -900,6 +1207,8 @@ public final class ChatService: ChatServiceType, ObservableObject {
                 {
                     history[lastIndex].codeReviewRound!.status = .cancelled
                 }
+                
+                history[lastIndex].turnStatus = turnStatus
             })
 
             // The message of progress report could change rapidly
@@ -911,14 +1220,14 @@ public final class ChatService: ChatServiceType, ObservableObject {
         }
     }
     
-    private func sendConversationRequest(_ request: ConversationRequest) async throws {
+    private func sendConversationRequest(_ request: ConversationRequest) async throws -> ConversationCreateResponse? {
         guard !isReceivingMessage else { throw CancellationError() }
         isReceivingMessage = true
         requestType = .conversation
         
         do {
             if let conversationId = conversationId {
-                try await conversationProvider?
+                return try await conversationProvider?
                     .createTurn(
                         with: conversationId,
                         request: request,
@@ -936,45 +1245,67 @@ public final class ChatService: ChatServiceType, ObservableObject {
                     requestWithTurns.turns = turns
                 }
                 
-                try await conversationProvider?.createConversation(requestWithTurns, workspaceURL: getWorkspaceURL())
+                return try await conversationProvider?.createConversation(requestWithTurns, workspaceURL: getWorkspaceURL())
             }
         } catch {
-            resetOngoingRequest()
+            resetOngoingRequest(with: .error)
             throw error
         }
     }
     
-    // MARK: - File Edit
-    public func undoFileEdit(for fileURL: URL) throws {
-        guard let fileEdit = self.fileEditMap[fileURL],
-              fileEdit.status == .none
-        else { return }
-        
-        switch fileEdit.toolName {
-        case .insertEditIntoFile:
-            InsertEditIntoFileTool.applyEdit(for: fileURL, content: fileEdit.originalContent, contextProvider: self)
-        case .createFile:
-            try CreateFileTool.undo(for: fileURL)
-        default:
+    private func deleteTurns(_ turnIds: [String]) async {
+        guard !turnIds.isEmpty, let conversationId = conversationId else {
             return
         }
         
-        self.fileEditMap[fileURL]!.status = .undone
+        let workspaceURL = getWorkspaceURL()
+        
+        for turnId in turnIds {
+            do {
+                try await conversationProvider?
+                    .deleteTurn(with: conversationId, turnId: turnId, workspaceURL: workspaceURL)
+            } catch {
+                Logger.client.error("Failed to delete turn: \(error)")
+            }
+        }
     }
     
-    public func keepFileEdit(for fileURL: URL) {
-        guard let fileEdit = self.fileEditMap[fileURL], fileEdit.status == .none
-        else { return }
-        self.fileEditMap[fileURL]!.status = .kept
+    // MARK: - Certificate Error Detection
+    
+    /// Checks if an error is related to SSL certificate issues
+    private func isCertificateError(_ error: Error) -> Bool {
+        let errorDescription = error.localizedDescription.lowercased()
+        
+        // Check for certificate error messages
+        if errorDescription.contains("unable to get local issuer certificate") ||
+           errorDescription.contains("self-signed certificate in certificate chain") ||
+           errorDescription.contains("unable_to_get_issuer_cert_locally") {
+            return true
+        }
+        
+        // Check GitHubCopilotError with ServerError
+        if let serverError = error as? ServerError,
+            case .serverError(_, let message, _) = serverError {
+                let serverMessage = message.lowercased()
+                if serverMessage.contains("unable to get local issuer certificate") ||
+                   serverMessage.contains("self-signed certificate in certificate chain") {
+                    return true
+            }
+        }
+        
+        return false
     }
     
-    public func resetFileEdits() {
-        self.fileEditMap = [:]
-    }
-    
-    public func discardFileEdit(for fileURL: URL) throws {
-        try self.undoFileEdit(for: fileURL)
-        self.fileEditMap.removeValue(forKey: fileURL)
+    private func showCertificateErrorMessage(turnId: String?) async {
+        let messageId = turnId ?? UUID().uuidString
+        let errorMessage = ChatMessage(
+            errorMessageWithId: messageId,
+            chatTabID: chatTabInfo.id,
+            errorMessages: [
+                SSLCertificateErrorMessage
+            ]
+        )
+        await memory.appendMessage(errorMessage)
     }
 }
 
@@ -982,6 +1313,7 @@ public final class ChatService: ChatServiceType, ObservableObject {
 public final class SharedChatService {
     public var chatTemplates: [ChatTemplate]? = nil
     public var chatAgents: [ChatAgent]? = nil
+    public var conversationModes: [ConversationMode]? = nil
     private let conversationProvider: ConversationServiceProvider?
     
     public static let shared = SharedChatService.service()
@@ -1002,6 +1334,19 @@ public final class SharedChatService {
             if let templates = (try await conversationProvider?.templates()) {
                 self.chatTemplates = templates
                 return templates
+            }
+        } catch {
+            // handle error if desired
+        }
+
+        return nil
+    }
+    
+    public func loadConversationModes() async -> [ConversationMode]? {
+        do {
+            if let modes = (try await conversationProvider?.modes()) {
+                self.conversationModes = modes
+                return modes
             }
         } catch {
             // handle error if desired
@@ -1152,57 +1497,55 @@ extension ChatService {
         
         guard !isReceivingMessage else {
             activeRequestId = nil
-            throw CancellationError() 
+            throw CancellationError()
         }
         isReceivingMessage = true
         requestType = .codeReview
+        let turnId = UUID().uuidString
         
-        do {
-            await CodeReviewService.shared.resetComments()
-            
-            let turnId = UUID().uuidString
-            
-            await addCodeReviewUserMessage(id: UUID().uuidString, turnId: turnId, group: group)
-            
-            let initialBotMessage = ChatMessage(
-                assistantMessageWithId: turnId, 
-                chatTabID: chatTabInfo.id
-            )
-            await memory.appendMessage(initialBotMessage)
-            
-            guard let projectRootURL = getProjectRootURL()
-            else {
-                let round = CodeReviewRound.fromError(turnId: turnId, error: "Invalid git repository.")
-                await appendCodeReviewRound(round)
-                resetOngoingRequest()
-                return
-            }
-            
-            let prChanges = await CurrentChangeService.getPRChanges(
-                projectRootURL, 
-                group: group,
-                shouldIncludeFile: shouldIncludeFileForReview
-            )
-            guard !prChanges.isEmpty else {
-                let round = CodeReviewRound.fromError(
-                    turnId: turnId, 
-                    error: group == .index ? "No staged changes found to review." : "No unstaged changes found to review."
-                )
-                await appendCodeReviewRound(round)
-                resetOngoingRequest()
-                return
-            }
-                        
-            let round: CodeReviewRound = .init(
+        await CodeReviewService.shared.resetComments()
+        
+        await addCodeReviewUserMessage(id: UUID().uuidString, turnId: turnId, group: group)
+        
+        let initialBotMessage = ChatMessage(
+            assistantMessageWithId: turnId,
+            chatTabID: chatTabInfo.id,
+            turnStatus: .inProgress,
+            requestType: .codeReview
+        )
+        await memory.appendMessage(initialBotMessage)
+        
+        guard let projectRootURL = getProjectRootURL()
+        else {
+            let round = CodeReviewRound.fromError(turnId: turnId, error: "Invalid git repository.")
+            await appendCodeReviewRound(round)
+            resetOngoingRequest(with: .error)
+            return
+        }
+        
+        let prChanges = await CurrentChangeService.getPRChanges(
+            projectRootURL,
+            group: group,
+            shouldIncludeFile: shouldIncludeFileForReview
+        )
+        guard !prChanges.isEmpty else {
+            let round = CodeReviewRound.fromError(
                 turnId: turnId,
-                status: .waitForConfirmation,
-                request: .from(prChanges)
+                error: group == .index
+                    ? "No staged changes found to review."
+                    : "No unstaged changes found to review."
             )
             await appendCodeReviewRound(round)
-        } catch {
             resetOngoingRequest()
-            throw error
+            return
         }
+        
+        let round: CodeReviewRound = .init(
+            turnId: turnId,
+            status: .waitForConfirmation,
+            request: .from(prChanges)
+        )
+        await appendCodeReviewRound(round, turnStatus: .waitForConfirmation)
     }
     
     private func shouldIncludeFileForReview(url: URL) -> Bool {
@@ -1215,9 +1558,15 @@ extension ChatService {
         }
     }
 
-    private func appendCodeReviewRound(_ round: CodeReviewRound) async {
+    private func appendCodeReviewRound(
+        _ round: CodeReviewRound,
+        turnStatus: ChatMessage.TurnStatus? = nil
+    ) async {
         let message = ChatMessage(
-            assistantMessageWithId: round.turnId, chatTabID: chatTabInfo.id, codeReviewRound: round
+            assistantMessageWithId: round.turnId,
+            chatTabID: chatTabInfo.id,
+            codeReviewRound: round,
+            turnStatus: turnStatus
         )
         
         await memory.appendMessage(message)
@@ -1253,7 +1602,7 @@ extension ChatService {
         round.status = .accepted
         request.updateSelectedChanges(by: selectedFileUris)
         round.request = request
-        await appendCodeReviewRound(round)
+        await appendCodeReviewRound(round, turnStatus: .inProgress)
         
         round.status = .running
         await appendCodeReviewRound(round)
@@ -1266,7 +1615,7 @@ extension ChatService {
         if let errorMessage = errorMessage {
             round = round.withError(errorMessage)
             await appendCodeReviewRound(round)
-            resetOngoingRequest()
+            resetOngoingRequest(with: .error)
             return
         } 
         
@@ -1290,14 +1639,19 @@ extension ChatService {
         round.status = .cancelled
         await appendCodeReviewRound(round)
         
-        resetOngoingRequest()
+        resetOngoingRequest(with: .cancelled)
     }
     
     private func addCodeReviewUserMessage(id: String, turnId: String, group: GitDiffGroup) async {
         let content = group == .index
             ? "Code review for staged changes."
             : "Code review for unstaged changes."
-        let chatMessage = ChatMessage(userMessageWithId: id, chatTabId: chatTabInfo.id, content: content)
+        let chatMessage = ChatMessage(
+            userMessageWithId: id,
+            chatTabId: chatTabInfo.id,
+            content: content,
+            requestType: .codeReview
+        )
         await memory.appendMessage(chatMessage)
         saveChatMessageToStorage(chatMessage)
     }

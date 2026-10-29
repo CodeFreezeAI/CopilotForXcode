@@ -7,14 +7,18 @@ struct ReviewSummarySection: View {
     @AppStorage(\.chatFontSize) var chatFontSize
     
     var body: some View {
-        if round.status == .error, let errorMessage = round.error {
-            Text(errorMessage)
-                .scaledFont(size: chatFontSize)
-        } else if round.status == .completed, let request = round.request, let response = round.response {
-            CompletedSummary(request: request, response: response)
-        } else {
-            Text("Oops, failed to review changes.")
-                .font(.system(size: chatFontSize))
+        HStack {
+            if round.status == .error, let errorMessage = round.error {
+                Text(errorMessage)
+                    .scaledFont(size: chatFontSize)
+            } else if round.status == .completed, let request = round.request, let response = round.response {
+                CompletedSummary(request: request, response: response)
+            } else {
+                Text("Oops, failed to review changes.")
+                    .font(.system(size: chatFontSize))
+            }
+            
+            Spacer()
         }
     }
 }

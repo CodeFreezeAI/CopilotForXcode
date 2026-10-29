@@ -8,7 +8,9 @@ public class BYOKModelManager {
         let sortedModels = BYOKModels.sorted()
         guard sortedModels != availableBYOKModels else { return }
         availableBYOKModels = sortedModels
-        NotificationCenter.default.post(name: .gitHubCopilotModelsDidChange, object: nil)
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: .gitHubCopilotModelsDidChange, object: nil)
+        }
     }
 
     public static func hasBYOKModels(providerName: BYOKProviderName? = nil) -> Bool {

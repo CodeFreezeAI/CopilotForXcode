@@ -49,11 +49,9 @@ public struct CodeReviewProvider {
     ) async throws -> CodeReviewResult? {
         return try await context.conversationServiceProvider?
             .reviewChanges(
-                .init(
-                    changes: changes.map {
-                        .init(uri: $0.uri, path: $0.path, baseContent: $0.baseContent, headContent: $0.headContent)
-                    }
-                )
+                changes.map {
+                    .init(uri: $0.uri, path: $0.path, baseContent: $0.baseContent, headContent: $0.headContent)
+                }
             )
     }
 }

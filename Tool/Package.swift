@@ -5,7 +5,7 @@ import PackageDescription
 
 let package = Package(
     name: "Tool",
-    platforms: [.macOS(.v12)],
+    platforms: [.macOS(.v13)],
     products: [
         .library(name: "XPCShared", targets: ["XPCShared"]),
         .library(name: "Terminal", targets: ["Terminal"]),
@@ -22,6 +22,7 @@ let package = Package(
         .library(name: "Persist", targets: ["Persist"]),
         .library(name: "UserDefaultsObserver", targets: ["UserDefaultsObserver"]),
         .library(name: "Workspace", targets: ["Workspace", "WorkspaceSuggestionService"]),
+        .library(name: "WorkspaceSuggestionService", targets: ["WorkspaceSuggestionService"]),
         .library(name: "WebContentExtractor", targets: ["WebContentExtractor"]),
         .library(
             name: "SuggestionProvider",
@@ -65,7 +66,8 @@ let package = Package(
         .library(name: "StatusBarItemView", targets: ["StatusBarItemView"]),
         .library(name: "HostAppActivator", targets: ["HostAppActivator"]),
         .library(name: "AppKitExtension", targets: ["AppKitExtension"]),
-        .library(name: "GitHelper", targets: ["GitHelper"])
+        .library(name: "GitHelper", targets: ["GitHelper"]),
+        .library(name: "NotificationCenterCoordinator", targets: ["NotificationCenterCoordinator"])
     ],
     dependencies: [
         // TODO: Update LanguageClient some day.
@@ -188,6 +190,7 @@ let package = Package(
             dependencies: [
                 "SuggestionBasic",
                 "SuggestionProvider",
+                "TelemetryServiceProvider",
                 "Workspace",
                 .product(name: "CopilotForXcodeKit", package: "CopilotForXcodeKit"),
             ]
@@ -196,9 +199,11 @@ let package = Package(
         .target(
             name: "SharedUIComponents",
             dependencies: [
+                "AppKitExtension",
                 "Highlightr",
                 "Preferences",
                 "SuggestionBasic",
+                "Status",
                 "DebounceFunction",
                 "ConversationServiceProvider",
                 .product(name: "ComposableArchitecture", package: "swift-composable-architecture"),
@@ -238,7 +243,7 @@ let package = Package(
             ]
         ),
         
-        .target(name: "StatusBarItemView", dependencies: ["Cache"]),
+        .target(name: "StatusBarItemView", dependencies: ["Cache", "Status"]),
       
         .target(
             name: "Cache"
@@ -264,7 +269,8 @@ let package = Package(
             dependencies: [
                 "Logger",
                 "Status",
-                .product(name: "SQLite", package: "SQLite.Swift")
+                .product(name: "SQLite", package: "SQLite.Swift"),
+                .product(name: "JSONRPC", package: "JSONRPC")
             ]
         ),
 
@@ -279,6 +285,7 @@ let package = Package(
         
         .target(name: "ConversationServiceProvider", dependencies: [
             "GitHelper",
+            "SuggestionBasic",
             .product(name: "CopilotForXcodeKit", package: "CopilotForXcodeKit"),
             .product(name: "LanguageServerProtocol", package: "LanguageServerProtocol"),
         ]),
@@ -301,6 +308,8 @@ let package = Package(
 
         // MARK: - GitHub Copilot
 
+        .target(name: "NotificationCenterCoordinator"),
+
         .target(
             name: "GitHubCopilotService",
             dependencies: [
@@ -316,6 +325,8 @@ let package = Package(
                 "SystemUtils",
                 "Workspace",
                 "Persist",
+                "SuggestionProvider",
+                "NotificationCenterCoordinator",
                 .product(name: "LanguageServerProtocol", package: "LanguageServerProtocol"),
                 .product(name: "CopilotForXcodeKit", package: "CopilotForXcodeKit"),
             ]

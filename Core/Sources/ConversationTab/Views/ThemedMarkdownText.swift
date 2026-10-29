@@ -26,7 +26,11 @@ public struct ThemedMarkdownText: View {
     @AppStorage(\.chatFontSize) var chatFontSize
     @Environment(\.colorScheme) var colorScheme
     
+    static let defaultForegroundColor: Color = .primary
+    
     @StateObject private var fontScaleManager = FontScaleManager.shared
+    
+    let foregroundColor: Color
     
     var fontScale: Double {
         fontScaleManager.currentScale
@@ -43,9 +47,10 @@ public struct ThemedMarkdownText: View {
     let text: String
     let context: MarkdownActionProvider
 
-    public init(text: String, context: MarkdownActionProvider) {
+    public init(text: String, context: MarkdownActionProvider, foregroundColor: Color? = nil) {
         self.text = text
         self.context = context
+        self.foregroundColor = foregroundColor ?? Self.defaultForegroundColor
     }
     
     init(text: String, chat: StoreOf<Chat>) {
@@ -54,6 +59,7 @@ public struct ThemedMarkdownText: View {
         self.context = .init(onInsert: { content in 
             chat.send(.insertCode(content))
         })
+        self.foregroundColor = Self.defaultForegroundColor
     }
 
     public var body: some View {
@@ -61,6 +67,7 @@ public struct ThemedMarkdownText: View {
             .textSelection(.enabled)
             .markdownTheme(.custom(
                 fontSize: scaledChatFontSize,
+                foregroundColor: foregroundColor,
                 codeFont: scaledChatCodeFont,
                 codeBlockBackgroundColor: {
                     if syncCodeHighlightTheme {
@@ -95,13 +102,14 @@ public struct ThemedMarkdownText: View {
 extension MarkdownUI.Theme {
     static func custom(
         fontSize: Double,
+        foregroundColor: Color,
         codeFont: NSFont,
         codeBlockBackgroundColor: Color,
         codeBlockLabelColor: Color,
         context: MarkdownActionProvider
     ) -> MarkdownUI.Theme {
         .gitHub.text {
-            ForegroundColor(.primary)
+            ForegroundColor(foregroundColor)
             BackgroundColor(Color.clear)
             FontSize(fontSize)
         }
@@ -166,16 +174,14 @@ struct MarkdownCodeBlockView: View {
 
 struct ThemedMarkdownText_Previews: PreviewProvider {
     static var previews: some View {
-        let chatTabInfo = ChatTabInfo(id: "id", workspacePath: "path", username: "name")
         ThemedMarkdownText(
-            text:"""
-    ```swift
-    let sumClosure: (Int, Int) -> Int = { (a: Int, b: Int) in
-        return a + b
-    }
-    ```
-    """,
-            context: .init(onInsert: {_ in  print("Inserted") }))
+            text: """
+            ```swift
+            let sumClosure: (Int, Int) -> Int = { (a: Int, b: Int) in
+                return a + b
+            }
+            ```
+            """,
+            context: .init(onInsert: { _ in print("Inserted") }))
     }
 }
-

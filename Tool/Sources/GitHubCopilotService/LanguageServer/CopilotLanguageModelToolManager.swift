@@ -5,6 +5,8 @@ import Logger
 public extension Notification.Name {
     static let gitHubCopilotToolsDidChange = Notification
         .Name("com.github.CopilotForXcode.CopilotToolsDidChange")
+    static let gitHubCopilotCustomAgentToolsDidChange = Notification
+        .Name("com.github.CopilotForXcode.CustomAgentToolsDidChange")
 }
 
 public class CopilotLanguageModelToolManager {
@@ -24,8 +26,8 @@ public class CopilotLanguageModelToolManager {
         }
 
         // Map previous and new by name for merging.
-        let previousByName = Dictionary(uniqueKeysWithValues: previous.map { ($0.name, $0) })
-        let incomingByName = Dictionary(uniqueKeysWithValues: tools.map { ($0.name, $0) })
+        let previousByName = Dictionary(previous.map { ($0.name, $0) }) { first, _ in first }
+        let incomingByName = Dictionary(tools.map { ($0.name, $0) }) { first, _ in first }
 
         var merged: [LanguageModelTool] = []
 

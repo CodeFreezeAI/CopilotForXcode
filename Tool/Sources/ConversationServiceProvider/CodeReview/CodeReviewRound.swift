@@ -1,6 +1,14 @@
 import Foundation
 import LanguageServerProtocol
 import GitHelper
+import CopilotForXcodeKit
+
+extension WorkspaceInfo: @retroactive Equatable {
+    public static func ==(lhs: WorkspaceInfo, rhs: WorkspaceInfo) -> Bool {
+        return lhs.projectURL == rhs.projectURL
+            && lhs.workspaceURL == rhs.workspaceURL
+    }
+}
 
 public struct CodeReviewRequest: Equatable, Codable {
     public struct FileChange: Equatable, Codable {
@@ -14,6 +22,7 @@ public struct CodeReviewRequest: Equatable, Codable {
     }
     
     public var fileChange: FileChange
+    public var workspaceInfo: WorkspaceInfo?
     
     public var changedFileUris: [DocumentUri] { fileChange.changes.map { $0.uri } }
     public var selectedFileUris: [DocumentUri] { fileChange.selectedChanges.map { $0.uri } }
